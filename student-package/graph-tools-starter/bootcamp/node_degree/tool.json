@@ -1,0 +1,20 @@
+{
+  "name": "node_degree",
+  "implementation_id": "node_degree.ns26z168",
+  "author": "ns26z168",
+  "tier": "bootcamp",
+  "category": "structure",
+  "description": "Counts a node's connections in a graph. For directed graphs it returns incoming, outgoing, and total degree; for undirected graphs it returns the degree. Use it to answer questions about direct routes, links, or neighbours of a specific node. The result includes the node id and human-readable label.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "graph_id": {"type": "string", "description": "Id of the graph to analyse."},
+      "node": {"type": "string", "description": "Id of the node whose connections should be counted."}
+    },
+    "required": ["graph_id", "node"]
+  },
+  "examples": [
+    {"graph_id": "karate", "node": "m1"},
+    {"graph_id": "airports", "node": "MAA"}
+  ]
+}

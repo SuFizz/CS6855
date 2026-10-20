@@ -1,0 +1,4 @@
+# Part A questions. One per line; lines starting with # are ignored.
+How many airports can you fly to non-stop from Chennai?
+Which airport has more incoming non-stop routes, Delhi or Mumbai, and by how many?
+In the karate club network, how many friends does the club's instructor have?
