@@ -1,0 +1,166 @@
+[
+  {
+    "query_id": "tool_articulation_points_bridges",
+    "question": "In the karate graph, use articulation-point and bridge analysis to identify the articulation points and bridges. Return the node IDs and edge endpoints, limited to 10 entries per list."
+  },
+  {
+    "query_id": "tool_betweenness_centrality",
+    "question": "Using betweenness centrality on the karate graph, which five members are the most important brokers? Return their node IDs in ranked order and include the scores."
+  },
+  {
+    "query_id": "tool_bipartite_check",
+    "question": "Check whether the projects graph is bipartite. Report the boolean result and the two node sides."
+  },
+  {
+    "query_id": "tool_bipartite_matching",
+    "question": "Find a maximum bipartite matching in the projects graph. How many students can be assigned to projects, and which students remain unmatched?"
+  },
+  {
+    "query_id": "tool_closeness_centrality",
+    "question": "Rank the top five nodes in the karate graph by closeness centrality. Return the node IDs in order with their scores."
+  },
+  {
+    "query_id": "tool_clustering_coefficient",
+    "question": "Compute the local clustering coefficient of node m1 in the karate graph and also report the graph's average clustering coefficient."
+  },
+  {
+    "query_id": "tool_connected_components",
+    "question": "Find the connected components of the undirected projects graph. How many components are there, and what is the size of the largest one?"
+  },
+  {
+    "query_id": "tool_degree_centrality",
+    "question": "Rank the five airports with the highest degree centrality in the airports graph. Return their IATA node IDs and scores in order."
+  },
+  {
+    "query_id": "tool_degree_distribution",
+    "question": "Compute the complete degree distribution of the karate graph and report the degree/count buckets."
+  },
+  {
+    "query_id": "tool_diameter_eccentricity",
+    "question": "Compute the diameter of the connected karate graph and identify its center and periphery nodes using diameter and eccentricity analysis."
+  },
+  {
+    "query_id": "tool_ego_network",
+    "question": "Build the radius-one ego network around node m1 in the karate graph, including m1. How many nodes and edges are in that ego network?"
+  },
+  {
+    "query_id": "tool_girvan_newman",
+    "question": "Use the Girvan-Newman algorithm to divide the karate graph into two communities. Report the community sizes and member node IDs."
+  },
+  {
+    "query_id": "tool_graph_summary",
+    "question": "Summarise the airports graph using the graph-summary tool. Report its node count, edge count, density, and average degree."
+  },
+  {
+    "query_id": "tool_greedy_coloring",
+    "question": "Apply greedy graph coloring to the karate graph. How many colors are used, and what color is assigned to each of the first ten returned nodes?"
+  },
+  {
+    "query_id": "tool_hits",
+    "question": "Run HITS on the airports graph and rank the top five authority airports. Return each IATA node ID with both its authority and hub score."
+  },
+  {
+    "query_id": "tool_k_core",
+    "question": "Find the densest k-core of the karate graph. Report the maximum core number, its size, and the returned subgraph ID."
+  },
+  {
+    "query_id": "tool_k_hop_neighborhood",
+    "question": "Find every node within two hops of node m1 in the karate graph using a k-hop neighborhood. Report the node IDs and the resulting subgraph ID."
+  },
+  {
+    "query_id": "tool_label_propagation",
+    "question": "Detect communities in the karate graph with deterministic label propagation using seed 0. Report the number of communities and their sizes."
+  },
+  {
+    "query_id": "tool_link_prediction",
+    "question": "Using common-neighbor link prediction on the karate graph, return the top five currently missing edges most likely to form, with scores."
+  },
+  {
+    "query_id": "tool_louvain",
+    "question": "Run Louvain community detection on the karate graph with seed 0. Report the modularity, community count, and community sizes."
+  },
+  {
+    "query_id": "tool_max_flow_min_cut",
+    "question": "Treat each edge as unit capacity in the courses graph and compute the maximum flow and minimum cut from CS101 to CS401. Report the flow value and cut edges."
+  },
+  {
+    "query_id": "tool_maximal_cliques",
+    "question": "Find the five largest maximal cliques in the karate graph. Return each clique's size and member node IDs."
+  },
+  {
+    "query_id": "tool_minimum_spanning_tree",
+    "question": "Compute a minimum spanning tree of the weighted lesmis graph. Report its total weight, number of edges, and resulting subgraph ID."
+  },
+  {
+    "query_id": "tool_motif_count",
+    "question": "Count triangle motifs in the undirected karate graph and return up to five example triangles."
+  },
+  {
+    "query_id": "tool_node_embedding_similarity",
+    "question": "Using node-embedding similarity on the karate graph, find the five nodes structurally most similar to node m1. Return node IDs and cosine-similarity scores."
+  },
+  {
+    "query_id": "tool_node_similarity",
+    "question": "Compare nodes m1 and m2 in the karate graph using common neighbors and Jaccard similarity. Report the common-neighbor IDs, count, and score."
+  },
+  {
+    "query_id": "tool_pagerank",
+    "question": "Run PageRank on the airports graph and return the five highest-ranked airport node IDs with scores."
+  },
+  {
+    "query_id": "tool_personalized_pagerank",
+    "question": "Run personalized PageRank on the airports graph with MAA as the seed node. Return the five highest-ranked airport IDs other than or including the seed as the tool defines."
+  },
+  {
+    "query_id": "tool_reachability",
+    "question": "In the directed courses graph, is node CS405 reachable from CS101? Return a boolean answer based on reachability analysis."
+  },
+  {
+    "query_id": "tool_shortest_path_unweighted",
+    "question": "Find the fewest-hop path from m1 to m34 in the unweighted karate graph. Return the ordered node-ID path and hop count."
+  },
+  {
+    "query_id": "tool_shortest_path_weighted",
+    "question": "Using route distance weights in the airports graph, find the shortest weighted path from MAA to DEL. Return the ordered airport-ID path and total distance."
+  },
+  {
+    "query_id": "tool_strongly_connected_components",
+    "question": "Find the strongly connected components of the directed airports graph. Report whether it is strongly connected, the component count, largest size, and largest component subgraph ID."
+  },
+  {
+    "query_id": "tool_topological_sort",
+    "question": "Topologically sort the directed courses graph. Return the complete ordered list of course node IDs, or report a cycle if one exists."
+  },
+  {
+    "query_id": "infra_list_graphs",
+    "question": "List every graph currently available for analysis with its graph ID, node count, edge count, and whether it is directed and weighted."
+  },
+  {
+    "query_id": "infra_lookup_node",
+    "question": "In the airports graph, look up the exact node ID for Chennai International Airport."
+  },
+  {
+    "query_id": "infra_node_attributes",
+    "question": "Return all stored node attributes for airport node MAA in the airports graph."
+  },
+  {
+    "query_id": "infra_filter_nodes",
+    "question": "Filter the airports graph to airports whose country attribute equals India. Report the match count, examples, and resulting subgraph ID."
+  },
+  {
+    "query_id": "chain_filter_then_summary",
+    "question": "Create the subgraph of airports whose country is India, then run graph summary on that result_graph_id. Report the filtered node count, edge count, density, and average degree."
+  },
+  {
+    "query_id": "chain_louvain_then_pagerank",
+    "question": "Detect Louvain communities in the karate graph with seed 0, then run PageRank on the largest community using its result_graph_id. Return the three highest-ranked node IDs in that community."
+  },
+  {
+    "query_id": "status_clarification_needed",
+    "question": "Which node is the most important?"
+  },
+  {
+    "query_id": "status_unsupported",
+    "question": "Using the karate graph, predict tomorrow's stock-market closing price."
+  }
+]
