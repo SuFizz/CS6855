@@ -48,7 +48,7 @@ def answer_message(value="34", text="The karate graph has 34 nodes.", answer_typ
     return Message([function_call("answer", "submit_answer", {
         "status": "answered", "answer_text": text, "answer_type": answer_type,
         "answer_value_json": value,
-        "evidence": evidence or [{"step_id": "summary", "pointers": ["/result/nodes"]}],
+        "evidence": evidence or [{"step_id": "summary", "pointers": ["/summary"]}],
     })])
 
 
@@ -71,7 +71,8 @@ def test_single_tool_langgraph_answer_and_trace(tmp_path):
         result = agent.answer("q1", "How many nodes are in the karate graph?", trace)
     assert result["status"] == "answered"
     assert result["answer"] == {"type": "number", "value": 34}
-    assert result["tools_used"] == ["graph_summary.2f7893e5"]
+    expected = discover_project_tools(ROOT)["graph_summary"].implementation_id
+    assert result["tools_used"] == [expected]
     events = [json.loads(line) for line in trace.read_text().splitlines()]
     assert [event["type"] for event in events] == ["question", "llm_call", "tool_call", "llm_call", "final_answer"]
 
@@ -88,13 +89,14 @@ def test_result_graph_id_binding_is_chained(tmp_path):
     client = FakeClient([
         plan_message(steps, answer_type="text"),
         answer_message(value='"Filtered graph summarized."', text="Filtered graph summarized.",
-                       answer_type="text", evidence=[{"step_id": "summary", "pointers": ["/result/nodes"]}]),
+                       answer_type="text", evidence=[{"step_id": "summary", "pointers": ["/summary"]}]),
     ])
     trace = tmp_path / "chain.jsonl"
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("chain", "Summarize airports in India.", trace)
     assert result["status"] == "answered"
-    assert result["tools_used"] == ["filter_nodes.instructors", "graph_summary.2f7893e5"]
+    expected_summary = discover_project_tools(ROOT)["graph_summary"].implementation_id
+    assert result["tools_used"] == ["filter_nodes.instructors", expected_summary]
     tool_events = [json.loads(line) for line in trace.read_text().splitlines() if '"type": "tool_call"' in line]
     assert tool_events[1]["arguments"]["graph_id"] == "airports~1"
 
