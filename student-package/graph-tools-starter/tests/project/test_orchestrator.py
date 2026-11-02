@@ -38,9 +38,15 @@ def function_call(call_id, name, arguments):
             "function": {"name": name, "arguments": json.dumps(arguments)}}
 
 
-def plan_message(steps, mode="execute", explanation="Use the required graph tools.", answer_type="number"):
+def plan_message(steps, mode="execute", explanation="Use the required graph tools.", answer_type="number",
+                 missing_information=None, unsupported_capability=""):
+    if mode == "clarification_needed" and missing_information is None:
+        missing_information = ["graph_id"]
+    if mode == "unsupported" and not unsupported_capability:
+        unsupported_capability = "requested graph capability"
     return Message([function_call("plan", "submit_plan", {
-        "mode": mode, "explanation": explanation, "answer_type": answer_type, "steps": steps,
+        "mode": mode, "explanation": explanation, "missing_information": missing_information or [],
+        "unsupported_capability": unsupported_capability, "answer_type": answer_type, "steps": steps,
     })])
 
 
@@ -75,6 +81,21 @@ def test_single_tool_langgraph_answer_and_trace(tmp_path):
     assert result["tools_used"] == [expected]
     events = [json.loads(line) for line in trace.read_text().splitlines()]
     assert [event["type"] for event in events] == ["question", "llm_call", "tool_call", "llm_call", "final_answer"]
+
+
+def test_missing_plan_arguments_are_filled_using_exact_tool_schema(tmp_path):
+    incomplete = [{"id": "summary", "tool": "graph_summary", "purpose": "Count karate nodes",
+                   "arguments": {}, "bindings": [], "depends_on": []}]
+    argument_call = Message([function_call("args", "graph_summary", {"graph_id": "karate"})])
+    client = FakeClient([plan_message(incomplete), argument_call, answer_message()])
+    trace = tmp_path / "arguments.jsonl"
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("arguments", "How many nodes are in exact graph karate?", trace)
+    assert result["status"] == "answered"
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    tool_event = next(event for event in events if event["type"] == "tool_call")
+    assert tool_event["arguments"] == {"graph_id": "karate"}
+    assert any(event.get("purpose") == "arguments:summary" for event in events if event["type"] == "llm_call")
 
 
 def test_result_graph_id_binding_is_chained(tmp_path):
@@ -131,6 +152,35 @@ def test_failed_tool_triggers_bounded_replan(tmp_path):
     events = [json.loads(line) for line in trace.read_text().splitlines()]
     assert any(event["type"] == "replan" for event in events)
     assert sum(event["type"] == "tool_call" for event in events) == 2
+
+
+def test_missing_graph_failure_remains_error_when_replanner_says_unsupported(tmp_path):
+    bad = [{"id": "summary", "tool": "graph_summary", "purpose": "Summarize exact graph",
+            "arguments": {"graph_id": "no_such_graph"}, "bindings": [], "depends_on": []}]
+    client = FakeClient([
+        plan_message(bad),
+        plan_message([], mode="unsupported", explanation="The graph does not exist.",
+                     answer_type="text", unsupported_capability="requested graph instance"),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("missing_graph", "Summarize exact graph no_such_graph.", tmp_path / "missing_graph.jsonl")
+    assert result["status"] == "error"
+    assert "no_such_graph" in result["answer_text"]
+
+
+def test_missing_node_failure_remains_error_when_replanner_says_unsupported(tmp_path):
+    bad = [{"id": "neighbors", "tool": "k_hop_neighborhood", "purpose": "Use exact node",
+            "arguments": {"graph_id": "karate", "node": "m999", "k": 2},
+            "bindings": [], "depends_on": []}]
+    client = FakeClient([
+        plan_message(bad),
+        plan_message([], mode="unsupported", explanation="The node does not exist.",
+                     answer_type="text", unsupported_capability="requested node instance"),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("missing_node", "Use exact node m999 in karate.", tmp_path / "missing_node.jsonl")
+    assert result["status"] == "error"
+    assert "m999" in result["answer_text"]
 
 
 def test_completed_query_resumes_without_another_provider_call(tmp_path):

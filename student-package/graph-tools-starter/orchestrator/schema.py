@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from graphkit.contract import MAX_OUTPUT_BYTES, OUTPUT_KEYS
+from graphkit.menu import MENU
 
 ANSWER_TYPES = ("number", "boolean", "node", "node_list", "path", "text")
 STATUSES = ("answered", "clarification_needed", "unsupported", "error")
@@ -61,7 +62,7 @@ def validate_value(value, schema, path="value"):
     return None
 
 
-def validate_arguments(manifest, arguments, bound_parameters=()):
+def validate_arguments(manifest, arguments, bound_parameters=(), allow_missing=False):
     if not isinstance(arguments, dict):
         return "Tool arguments must be an object."
     schema = manifest.get("parameters", {})
@@ -71,7 +72,7 @@ def validate_arguments(manifest, arguments, bound_parameters=()):
     if unknown:
         return f"Unknown parameter(s) for {manifest.get('name')}: {', '.join(unknown)}."
     missing = sorted(name for name in schema.get("required", []) if name not in arguments and name not in bound)
-    if missing:
+    if missing and not allow_missing:
         return f"Missing required parameter(s) for {manifest.get('name')}: {', '.join(missing)}."
     for name, value in arguments.items():
         issue = validate_value(value, properties.get(name, {}), name)
@@ -147,11 +148,36 @@ def validate_plan(plan, tools, max_steps=5, completed_ids=()):
     steps = plan.get("steps")
     if not isinstance(steps, list):
         return ["Plan steps must be a list."]
-    if mode != "execute" and steps:
-        return ["Terminal clarification/unsupported plans cannot contain steps."]
-    if len(steps) > max_steps:
-        return [f"Plan has {len(steps)} steps; maximum is {max_steps}."]
+    missing_information = plan.get("missing_information")
+    unsupported_capability = plan.get("unsupported_capability")
     errors = []
+    if not isinstance(missing_information, list) or any(not isinstance(item, str) or not item.strip() for item in missing_information):
+        errors.append("missing_information must be a list of non-empty strings.")
+    if not isinstance(unsupported_capability, str):
+        errors.append("unsupported_capability must be a string.")
+    if mode == "execute":
+        if not steps:
+            errors.append("Execute plans require at least one step.")
+        if missing_information:
+            errors.append("Execute plans cannot declare missing information.")
+        if unsupported_capability:
+            errors.append("Execute plans cannot declare an unsupported capability.")
+    elif mode == "clarification_needed":
+        if steps:
+            errors.append("Clarification plans cannot contain steps.")
+        if not missing_information:
+            errors.append("Clarification plans must identify missing information.")
+        if unsupported_capability:
+            errors.append("Clarification plans cannot declare an unsupported capability.")
+    elif mode == "unsupported":
+        if steps:
+            errors.append("Unsupported plans cannot contain steps.")
+        if missing_information:
+            errors.append("Unsupported plans cannot declare missing information.")
+        if not unsupported_capability:
+            errors.append("Unsupported plans must identify the unavailable capability.")
+    if len(steps) > max_steps:
+        errors.append(f"Plan has {len(steps)} steps; maximum is {max_steps}.")
     ids = [step.get("id") for step in steps if isinstance(step, dict)]
     if len(ids) != len(steps) or any(not isinstance(step_id, str) or not step_id for step_id in ids):
         errors.append("Every step needs a non-empty string id.")
@@ -159,6 +185,7 @@ def validate_plan(plan, tools, max_steps=5, completed_ids=()):
         errors.append("Plan step ids must be unique.")
     known = set(ids) | set(completed_ids)
     graph = {}
+    steps_by_id = {step.get("id"): step for step in steps if isinstance(step, dict)}
     for step in steps:
         if not isinstance(step, dict):
             continue
@@ -186,6 +213,12 @@ def validate_plan(plan, tools, max_steps=5, completed_ids=()):
             pointer = binding.get("pointer")
             if source not in dependencies:
                 errors.append(f"Step {step_id!r} binding source {source!r} must be a dependency.")
+            source_step = steps_by_id.get(source)
+            if pointer == "/result_graph_id" and source_step:
+                source_tool = source_step.get("tool")
+                returns_subgraph = source_tool == "filter_nodes" or MENU.get(source_tool, (None, None, False))[2]
+                if not returns_subgraph:
+                    errors.append(f"Step {step_id!r} expects result_graph_id from non-subgraph tool {source_tool!r}.")
             try:
                 resolve_pointer({}, pointer)
             except KeyError:
@@ -193,7 +226,7 @@ def validate_plan(plan, tools, max_steps=5, completed_ids=()):
             except (TypeError, ValueError) as exc:
                 errors.append(f"Step {step_id!r} binding for {parameter!r}: {exc}")
             bound.append(parameter)
-        issue = validate_arguments(tools[tool_name].manifest, step.get("arguments", {}), bound)
+        issue = validate_arguments(tools[tool_name].manifest, step.get("arguments", {}), bound, allow_missing=True)
         if issue:
             errors.append(f"Step {step_id!r}: {issue}")
     visiting, visited = set(), set()
@@ -213,6 +246,19 @@ def validate_plan(plan, tools, max_steps=5, completed_ids=()):
     return errors
 
 
+def _relative_evidence_pointer(step_id, pointer):
+    if not isinstance(pointer, str):
+        return pointer
+    encoded = str(step_id).replace("~", "~0").replace("/", "~1")
+    prefixes = (f"/{encoded}", f"/steps/{encoded}")
+    for prefix in prefixes:
+        if pointer == prefix:
+            return ""
+        if pointer.startswith(prefix + "/"):
+            return pointer[len(prefix):]
+    return pointer
+
+
 def parse_answer(arguments, evidence):
     status = arguments.get("status")
     text = arguments.get("answer_text")
@@ -229,6 +275,8 @@ def parse_answer(arguments, evidence):
         value = json.loads(raw) if isinstance(raw, str) else raw
     except json.JSONDecodeError as exc:
         return None, f"answer_value_json is invalid: {exc}."
+    if answer_type == "text" and not isinstance(value, str):
+        value = text.strip()
     valid = {
         "number": isinstance(value, (int, float)) and not isinstance(value, bool),
         "boolean": isinstance(value, bool),
@@ -248,8 +296,9 @@ def parse_answer(arguments, evidence):
         if not isinstance(pointers, list) or not pointers:
             return None, "Evidence references need at least one JSON Pointer."
         for pointer in pointers:
+            relative = _relative_evidence_pointer(reference["step_id"], pointer)
             try:
-                resolve_pointer(evidence[reference["step_id"]]["output"], pointer)
+                resolve_pointer(evidence[reference["step_id"]]["output"], relative)
             except (KeyError, TypeError, ValueError):
                 return None, f"Evidence pointer {pointer!r} does not exist."
     return {"status": status, "answer_text": text.strip(), "answer": {"type": answer_type, "value": value}}, None

@@ -42,7 +42,8 @@ class Orchestrator:
         trace = ProjectTrace(trace_path, resume=resume)
         if trace.sequence == 0:
             trace.event("question", query_id=str(query_id), text=question)
-        executor = PlanExecutor(self.tools, self.project_root / "data", trace)
+        executor = PlanExecutor(self.tools, self.project_root / "data", trace,
+                                provider=self.provider, question=question)
         graph = build_workflow(provider=self.provider, tools=self.tools, executor=executor, trace=trace)
         app = graph.compile(checkpointer=self._saver)
         thread_id = self._thread_id(query_id, question)

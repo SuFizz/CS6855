@@ -22,6 +22,8 @@ class PlanStep(TypedDict):
 class Plan(TypedDict):
     mode: Literal["execute", "clarification_needed", "unsupported"]
     explanation: str
+    missing_information: list[str]
+    unsupported_capability: str
     answer_type: Literal["number", "boolean", "node", "node_list", "path", "text"]
     steps: list[PlanStep]
 

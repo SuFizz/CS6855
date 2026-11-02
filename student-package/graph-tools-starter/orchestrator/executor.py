@@ -5,15 +5,18 @@ import json
 
 from graphkit import GraphStore
 from graphkit.contract import error
+from graphkit.llm import tool_schema
 
 from .schema import resolve_pointer, validate_arguments, validate_tool_output
 
 
 class PlanExecutor:
-    def __init__(self, tools, data_dir, trace):
+    def __init__(self, tools, data_dir, trace, provider=None, question=""):
         self.tools = tools
         self.data_dir = data_dir
         self.trace = trace
+        self.provider = provider
+        self.question = question
         self.store = GraphStore(data_dir)
 
     @staticmethod
@@ -31,15 +34,53 @@ class PlanExecutor:
             arguments[binding["parameter"]] = resolve_pointer(source, binding["pointer"])
         return arguments
 
+    def prepare_arguments(self, step, evidence, arguments):
+        tool = self.tools[step["tool"]]
+        required = tool.manifest.get("parameters", {}).get("required", [])
+        missing = [name for name in required if name not in arguments]
+        if not missing:
+            return arguments, 0, None
+        if self.provider is None:
+            return arguments, 0, f"Missing required parameter(s) for {tool.name}: {', '.join(missing)}."
+        dependency_outputs = {step_id: evidence[step_id]["output"] for step_id in step.get("depends_on", []) if step_id in evidence}
+        payload = {"question": self.question, "step": {"id": step["id"], "purpose": step["purpose"]},
+                   "known_arguments": arguments, "missing_required": missing,
+                   "dependency_outputs": dependency_outputs}
+        messages = [
+            {"role": "system", "content": "Call the supplied graph tool exactly once. Fill missing required arguments from the original question. Preserve every known argument exactly. Include user-requested optional values such as k, seed and top_k when stated. Do not invent graph or node IDs."},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+        try:
+            message = self.provider.complete(
+                messages=messages, tools=[tool_schema(tool.manifest)],
+                tool_choice={"type": "function", "function": {"name": tool.name}},
+                purpose=f"arguments:{step['id']}", trace=self.trace,
+            )
+            calls = message.get("tool_calls") or []
+            selected = next(call for call in calls if call.get("function", {}).get("name") == tool.name)
+            raw = selected["function"].get("arguments", "{}")
+            generated = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(generated, dict):
+                raise ValueError("tool arguments must be an object")
+        except Exception as exc:
+            return arguments, 1, f"Could not prepare arguments for {tool.name}: {type(exc).__name__}: {exc}"
+        generated.update(arguments)
+        return generated, 1, None
+
     def execute(self, step, evidence, *, replay=False):
         tool = self.tools[step["tool"]]
         try:
             arguments = self.resolve_arguments(step, evidence)
         except (KeyError, TypeError, ValueError) as exc:
-            return None, f"Cannot resolve step {step['id']!r} bindings: {exc}"
+            return None, f"Cannot resolve step {step['id']!r} bindings: {exc}", 0
+        llm_calls = 0
+        if not replay:
+            arguments, llm_calls, issue = self.prepare_arguments(step, evidence, arguments)
+            if issue:
+                return None, issue, llm_calls
         issue = validate_arguments(tool.manifest, arguments)
         if issue:
-            return None, issue
+            return None, issue, llm_calls
         output = tool.call(self.store, **arguments)
         issue = validate_tool_output(output, self.store)
         if issue:
@@ -53,8 +94,8 @@ class PlanExecutor:
         }
         self.trace.event("tool_replay" if replay else "tool_call", **record)
         if output.get("status") != "ok":
-            return record, output.get("error") or "Tool failed."
-        return record, None
+            return record, output.get("error") or "Tool failed.", llm_calls
+        return record, None, llm_calls
 
     def rehydrate(self, evidence):
         original = list(evidence.values())
@@ -65,7 +106,7 @@ class PlanExecutor:
                 "id": expected["step_id"], "tool": expected["tool"], "purpose": "replay",
                 "arguments": expected["arguments"], "bindings": [], "depends_on": [],
             }
-            actual, issue = self.execute(step, rebuilt, replay=True)
+            actual, issue, _ = self.execute(step, rebuilt, replay=True)
             if issue:
                 raise RuntimeError(f"Cannot rehydrate {step['id']}: {issue}")
             expected_json = json.dumps(expected["output"], sort_keys=True, allow_nan=False)
