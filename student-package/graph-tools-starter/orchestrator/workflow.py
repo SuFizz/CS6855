@@ -20,8 +20,13 @@ def build_workflow(*, provider, tools, executor, trace):
 
     def terminal_node(state):
         plan = state["plan"]
-        status = plan["mode"]
-        text = plan.get("explanation") or ("Clarification is needed." if status == "clarification_needed" else "No available tool supports this request.")
+        failures = state.get("failures", [])
+        if failures:
+            status = "error"
+            text = failures[-1].get("error") or "A supported graph-tool operation failed."
+        else:
+            status = plan["mode"]
+            text = plan.get("explanation") or ("Clarification is needed." if status == "clarification_needed" else "No available tool supports this request.")
         return {"final": {"status": status, "answer_text": text,
                           "answer": {"type": "text", "value": text}}, "route": "done"}
 
@@ -35,17 +40,18 @@ def build_workflow(*, provider, tools, executor, trace):
         step = executor.ready_step(state["plan"], pending, evidence)
         if step is None:
             return {"failures": state.get("failures", []) + [{"error": "No pending plan step is ready."}], "route": "replan"}
-        record, issue = executor.execute(step, evidence)
+        record, issue, argument_llm_calls = executor.execute(step, evidence)
         calls = state.get("tool_call_count", 0) + 1
+        llm_calls = state.get("llm_call_count", 0) + argument_llm_calls
         pending.remove(step["id"])
         if issue:
             failure = {"step_id": step["id"], "tool": step["tool"], "error": issue,
                        "output": record["output"] if record else None}
-            return {"pending_step_ids": pending, "tool_call_count": calls,
+            return {"pending_step_ids": pending, "tool_call_count": calls, "llm_call_count": llm_calls,
                     "failures": state.get("failures", []) + [failure], "route": "replan"}
         evidence[step["id"]] = record
         return {"pending_step_ids": pending, "evidence": evidence, "tool_call_count": calls,
-                "route": "execute" if pending else "finalize"}
+                "llm_call_count": llm_calls, "route": "execute" if pending else "finalize"}
 
     def replan_node(state):
         if state.get("replan_count", 0) >= state["max_replans"]:
