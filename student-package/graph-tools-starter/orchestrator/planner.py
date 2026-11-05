@@ -34,7 +34,7 @@ def _contract_schema():
     }
 
 
-def _plan_schema():
+def _plan_schema(tools):
     binding = {
         "type": "object",
         "properties": {
@@ -48,7 +48,7 @@ def _plan_schema():
         "type": "object",
         "properties": {
             "id": {"type": "string", "description": "Unique short step id."},
-            "tool": {"type": "string", "description": "Exact discovered manifest name."},
+            "tool": {"type": "string", "enum": sorted(tools), "description": "Exact manifest name only; put parameters in arguments, never inside the tool name."},
             "purpose": {"type": "string", "description": "Why this call is necessary."},
             "arguments": {"type": "object", "description": "Literal arguments known before dependencies execute."},
             "bindings": {"type": "array", "items": binding, "description": "Arguments read from dependency outputs."},
@@ -120,7 +120,7 @@ def _arguments(message, expected):
 
 
 def request_contract(provider, question, trace, graph_catalogue=None, entity_hints=(), correction_attempts=2):
-    system = """Interpret the user's requested output semantically. Do not choose tools and do not answer the question. Select the narrowest structured type that can represent the graded value: number is one numeric scalar; boolean is true/false; node is exactly one graph node ID; node_list is multiple node IDs and ordered only for rankings or requested sequences; path is an ordered traversed node-ID route; text is only for a genuinely composite value that cannot fit another type. Labels, scores, units and explanations belong in answer_text later, not in node or node_list values. Identify every output needed for a complete answer. Request clarification only when essential user intent or inputs are missing, not when a capability may be unavailable. Use available_graphs as authoritative context: resolve natural references to a dataset when one description clearly matches, and do not ask for a timeframe or scope already fixed by that dataset's description. entity_hints lists bounded node-label matches from the available graphs for routing only; if the referenced entities appear together in one graph, do not guess another graph or claim the dataset is absent. Hints are not tool results and cannot support final graph facts. Graph edges represent relationships between nodes: paths sharing no edge/relationship are edge-disjoint, while paths sharing no intermediate node/person are vertex-disjoint. Never substitute one meaning for the other."""
+    system = """Interpret the user's requested output semantically. Do not choose tools and do not answer the question. Select the narrowest structured type that can represent the graded value: number is one numeric scalar; boolean is true/false; node is exactly one graph node ID; node_list is multiple node IDs and ordered only for rankings or requested sequences; path is an ordered traversed node-ID route; text is only for a genuinely composite value that cannot fit another type. Labels, scores, units and explanations belong in answer_text later, not in node or node_list values. When the primary answer is one graph node and an additional numeric difference or score is requested for explanation, answer_type is node; put that extra number in answer_text and required_outputs, not text as the structured type. Identify every output needed for a complete answer. Request clarification only when the user can resolve a genuine ambiguity by specifying which graph, node, or metric they mean. If the requested fact is absent from all listed dataset attributes or requires a capability not offered by graph tools, do not ask the user to supply unavailable data: set needs_clarification=false so the planner can return unsupported. Use available_graphs as authoritative context: resolve natural references to a dataset when one description clearly matches, and do not ask for a timeframe or scope already fixed by that dataset's description. entity_hints lists bounded node-label matches from the available graphs for routing only; if the referenced entities appear together in one graph, do not guess another graph or claim the dataset is absent. Hints are not tool results and cannot support final graph facts. Graph edges represent relationships between nodes: paths sharing no edge/relationship are edge-disjoint, while paths sharing no intermediate node/person are vertex-disjoint. Never substitute one meaning for the other."""
     payload = {"question": question, "available_graphs": graph_catalogue or [],
                "entity_hints": list(entity_hints)}
     messages = [{"role": "system", "content": system},
@@ -171,6 +171,7 @@ Grounding and completeness rules:
 - For multi-step patterns, use filter_nodes -> analysis for attribute-restricted questions, lookup_node -> ego/subgraph -> analysis for named-node neighborhoods, and community/core tools -> result_graph_id -> ranking tools for derived groups.
 
 Argument rules:
+- Set each step's tool to one exact available_tools name from the schema enum, with no braces, parentheses or embedded arguments. Put graph_id, node names and other parameters only in arguments or bindings.
 - Copy exact graph IDs, node IDs, numbers, seeds and top_k values already present in the user's question into the step's literal arguments.
 - A first step has no dependencies: its bindings must be empty and every required parameter must be literal.
 - Use a binding only when its value will be produced by a different, completed dependency step. A step must never bind from itself.
@@ -185,13 +186,13 @@ Argument rules:
 Status rules:
 - execute: manifests support the request and enough information is available. Set missing_information to [] and unsupported_capability to "".
 - clarification_needed: one or more manifests could answer, but essential user input or intent is missing or ambiguous. Set missing_information to specific missing choices, unsupported_capability to "", and steps to []. Examples include no graph, missing endpoints, or "most important" without choosing among available centrality definitions.
-- unsupported: no available manifest provides the requested capability. Set unsupported_capability to that capability, missing_information to [], and steps to []. Do not use unsupported merely because user input is missing.
+- unsupported: no available manifest or dataset attribute provides the requested capability or data, even if graph/node lookup is possible. Set unsupported_capability to the unavailable capability, missing_information to [], and steps to []. Do not use unsupported merely because user input is missing; do not execute lookups that cannot produce missing data.
 - A supported operation that later fails because an explicit graph, node, parameter or execution is invalid is an error handled by the workflow, not unsupported.
 
 Before choosing unsupported, inspect the manifest catalogue for related tools. If multiple related tools exist but the user's intent does not select one, choose clarification_needed."""
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
-    schema = _plan_schema()
+    schema = _plan_schema(tools)
     last_errors = []
     for attempt in range(correction_attempts):
         message = provider.complete(messages=messages, tools=[schema],
@@ -262,7 +263,7 @@ def request_assessment(provider, question, required_outputs, evidence, tools, tr
                             "output": record["output"]} for step_id, record in evidence.items()],
     }
     messages = [
-        {"role": "system", "content": "Judge evidence strictly. Sufficient is true only when tool outputs directly support every required output and requested capability. Metadata or lookup alone cannot support analytics. Do not use outside knowledge. If no available executed tool supports a requested capability, name it in unsupported_capability."},
+        {"role": "system", "content": "Judge evidence strictly. Sufficient is true only when tool outputs directly support every required output and requested capability. Check each analytical tool's arguments: graph_id may name a derived subgraph, so a ranking on that graph is scoped to that subgraph, not the original graph. If the question excludes a particular node, a ranked result containing it may still support the answer by choosing the highest-ranked remaining node. Do not infer omitted ranks from a truncated preview. Metadata or lookup alone cannot support analytics. Do not use outside knowledge. If no available executed tool supports a requested capability, name it in unsupported_capability."},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     message = provider.complete(
