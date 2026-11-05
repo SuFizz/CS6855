@@ -108,12 +108,14 @@ Statuses are `answered`, `clarification_needed`, `unsupported` and `error`. Answ
 ## Architecture
 
 1. **Manifest discovery:** runtime scans only `infra_tools/` and the physically curated `registry/tools/`. Tool names, descriptions and schemas come from `tool.json`; no analytical implementation IDs are hard-coded in runtime code.
-2. **Planner:** Gemini receives a compact manifest catalogue and submits an executable DAG of at most five graph-tool steps, or an explicit clarification/unsupported decision.
-3. **Validation:** plans are rejected for unknown tools, cycles, bad dependencies, invalid bindings or manifest-incompatible arguments.
-4. **Executor:** LangGraph resolves JSON Pointer bindings, runs ready steps sequentially against one `GraphStore`, validates outputs and preserves registered `result_graph_id` subgraphs.
-5. **Replanning:** failures trigger bounded replanning while retaining successful evidence and the total call budget.
-6. **Finalization:** Gemini may answer only from successful evidence and must cite executed step IDs and output paths. Evidence remains in traces; answers retain the exact grader schema.
-7. **Reliability:** transient Gemini failures use bounded exponential retry, successful responses are cached, answers are atomically persisted, and SQLite checkpoints support resume. In-memory subgraphs are reconstructed by replaying completed calls after restart.
+2. **Graph catalogue:** dataset IDs, descriptions, direction, weighting and available attributes are loaded dynamically so the planner never invents graph IDs or wastes calls listing known graphs.
+3. **Semantic interpreter:** a dedicated structured Gemini call produces an immutable answer contract (type, cardinality, ordering, value meaning, required outputs and missing information) without keyword routing or tool planning.
+4. **Planner:** Gemini receives the answer contract plus graph and manifest catalogues and submits an executable DAG of at most five graph-tool steps.
+5. **Validation:** plans are rejected for unknown tools, cycles, bad dependencies, invalid bindings or manifest-incompatible arguments.
+6. **Executor:** LangGraph resolves JSON Pointer bindings, runs ready steps sequentially against one `GraphStore`, validates outputs and preserves registered `result_graph_id` subgraphs.
+7. **Evidence assessment:** a separate structured Gemini decision verifies that every answer-contract requirement is directly supported before finalization; insufficient evidence triggers bounded replanning.
+8. **Finalization:** Gemini may answer only from successful evidence and must cite executed step IDs and output paths. Node, node-list and path values contain IDs rather than labels. Evidence remains in traces; answers retain the exact grader schema.
+9. **Reliability:** transient Gemini failures use bounded exponential retry, successful responses are cached, answers are atomically persisted, and SQLite checkpoints support resume. In-memory subgraphs are reconstructed by replaying completed calls after restart.
 
 ## Traces
 
@@ -127,7 +129,17 @@ python curate_registry.py verify
 python smoke_test.py --no-llm
 ```
 
-A live Gemini smoke run requires `LLM_API_KEY`. The official public answers, traces, accuracy results and failure report must be generated only after the public query set is provided.
+A live Gemini smoke run requires `LLM_API_KEY`.
+
+Score a public run offline without exposing expected answers to the orchestrator:
+
+```bash
+python evaluation/score_public.py answers_public.json
+# Or score a trace archive:
+python evaluation/score_public.py ../../public_queries.zip
+```
+
+The evaluator checks status, answer type, numeric tolerance, node IDs, ranked order, paths and topological-order validity. Nothing under `evaluation/` is imported by runtime orchestration code.
 
 ## Project Layout
 
@@ -135,12 +147,14 @@ A live Gemini smoke run requires `LLM_API_KEY`. The official public answers, tra
 curate_registry.py              offline candidate evaluation and materialization
 run_queries.py                  required batch runner
 orchestrator/registry.py        manifest-first strict discovery
-orchestrator/planner.py         Gemini DAG planning and evidence finalization
+orchestrator/graph_catalogue.py dynamic dataset metadata for planning
+orchestrator/planner.py         Gemini DAG planning, evidence assessment and finalization
 orchestrator/executor.py        bindings, tool calls and GraphStore replay
 orchestrator/workflow.py        LangGraph state machine
 orchestrator/provider.py        Gemini retries and cache
 orchestrator/tracing.py         append-safe JSONL traces
 registry/tools/                 generated one-implementation-per-tool registry
 queries_registry_all.json       non-public development questions
+evaluation/                     offline public expected answers and scorer
 tests/project/                  orchestration and curation tests
 ```

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator.provider import GeminiProvider
+from orchestrator.provider import GeminiProvider, ProviderExhaustedError
 
 
 class RateLimitError(Exception):
@@ -35,6 +35,16 @@ def test_provider_retries_transient_errors_and_caches(tmp_path):
     second = provider.complete(**arguments)
     assert first == second
     assert client.calls == 2
+
+
+def test_provider_marks_exhaustion_after_transient_retries(tmp_path):
+    client = Client([RateLimitError("limited"), RateLimitError("limited"), RateLimitError("limited")])
+    provider = GeminiProvider(client=client, model="test", cache_path=tmp_path / "cache.json",
+                              max_attempts=3, base_delay=0, sleep=lambda _: None)
+    with pytest.raises(ProviderExhaustedError):
+        provider.complete(messages=[], tools=[], purpose="test")
+    assert provider.exhausted is True
+    assert client.calls == 3
 
 
 def test_provider_does_not_retry_non_transient_errors(tmp_path):

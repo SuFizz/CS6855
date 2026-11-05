@@ -45,9 +45,10 @@ class PlanExecutor:
         dependency_outputs = {step_id: evidence[step_id]["output"] for step_id in step.get("depends_on", []) if step_id in evidence}
         payload = {"question": self.question, "step": {"id": step["id"], "purpose": step["purpose"]},
                    "known_arguments": arguments, "missing_required": missing,
+                   "available_graph_ids": [item["graph_id"] for item in self.store.list_graphs()],
                    "dependency_outputs": dependency_outputs}
         messages = [
-            {"role": "system", "content": "Call the supplied graph tool exactly once. Fill missing required arguments from the original question. Preserve every known argument exactly. Include user-requested optional values such as k, seed and top_k when stated. Do not invent graph or node IDs."},
+            {"role": "system", "content": "Call the supplied graph tool exactly once. Fill missing required arguments from the original question. Preserve every known argument exactly. Include user-requested optional values such as k, seed and top_k when stated. For graph_id use only an exact available_graph_ids value or a dependency-produced result_graph_id. Do not invent, rename or transform graph or node IDs. For lookup_node, if a phrase contains a short uppercase/alphanumeric code token, use that exact token as name instead of including surrounding city, location or generic words."},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
         try:
@@ -78,6 +79,23 @@ class PlanExecutor:
             arguments, llm_calls, issue = self.prepare_arguments(step, evidence, arguments)
             if issue:
                 return None, issue, llm_calls
+        properties = tool.manifest.get("parameters", {}).get("properties", {})
+        graph_id = arguments.get("graph_id")
+        if graph_id is not None and not self.store.has_graph(graph_id):
+            available = [item["graph_id"] for item in self.store.list_graphs()]
+            return None, f"Unknown graph_id {graph_id!r}; valid graph IDs are {available}.", llm_calls
+        if graph_id and tool.manifest.get("category") == "centrality":
+            graph = self.store.get(graph_id)
+            distance_weights = graph.weighted and any(token in graph.description.lower() for token in ("distance", " km", "kilomet"))
+            if distance_weights:
+                for parameter in ("weighted", "use_weights"):
+                    if parameter in properties and parameter not in arguments:
+                        arguments[parameter] = False
+        if tool.name == "personalized_pagerank" and any(phrase in self.question.lower() for phrase in ("other than", "apart from", "excluding")):
+            if "exclude_seeds" in properties and "exclude_seeds" not in arguments:
+                arguments["exclude_seeds"] = True
+            if "include_source" in properties and "include_source" not in arguments:
+                arguments["include_source"] = False
         issue = validate_arguments(tool.manifest, arguments)
         if issue:
             return None, issue, llm_calls

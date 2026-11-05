@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from orchestrator.schema import parse_answer, resolve_pointer, validate_arguments, validate_plan
+from orchestrator.schema import parse_answer, resolve_pointer, validate_arguments, validate_plan, validate_query_contract
 
 
 def tool(name, required=None):
@@ -10,6 +10,18 @@ def tool(name, required=None):
         "method": {"type": "string", "enum": ["a", "b"]},
     }, "required": required or ["graph_id"]}}
     return SimpleNamespace(manifest=manifest)
+
+
+def test_query_contract_validation_is_semantic_not_keyword_based():
+    contract = {"answer_type": "node_list", "cardinality": "many", "ordered": True,
+                "value_description": "Ranked graph node IDs", "required_outputs": ["ranked node IDs"],
+                "needs_clarification": False, "missing_information": []}
+    assert validate_query_contract(contract) == []
+    contract["answer_type"] = "invalid"
+    assert any("answer_type" in error for error in validate_query_contract(contract))
+    contract["answer_type"] = "node_list"
+    contract["needs_clarification"] = True
+    assert any("missing information" in error for error in validate_query_contract(contract))
 
 
 def test_argument_validation_enforces_ranges_and_enum():
@@ -24,16 +36,16 @@ def test_json_pointer_handles_lists_and_escaping():
     assert resolve_pointer(document, "/result/0/a~1b/~0key") == 7
 
 
-def test_plan_validation_rejects_cycles_unknown_tools_and_too_many_steps():
+def test_plan_validation_rejects_cycles_and_unknown_tools():
     tools = {"summary": tool("summary")}
     cyclic = {"mode": "execute", "explanation": "x", "missing_information": [],
-              "unsupported_capability": "", "answer_type": "number", "steps": [
+              "unsupported_capability": "", "steps": [
         {"id": "a", "tool": "summary", "purpose": "x", "arguments": {"graph_id": "g"}, "bindings": [], "depends_on": ["b"]},
         {"id": "b", "tool": "summary", "purpose": "x", "arguments": {"graph_id": "g"}, "bindings": [], "depends_on": ["a"]},
     ]}
     assert any("cycle" in error for error in validate_plan(cyclic, tools))
     unknown = {"mode": "execute", "explanation": "x", "missing_information": [],
-               "unsupported_capability": "", "answer_type": "text", "steps": [
+               "unsupported_capability": "", "steps": [
         {"id": "a", "tool": "missing", "purpose": "x", "arguments": {}, "bindings": [], "depends_on": []}
     ]}
     assert any("unknown tool" in error for error in validate_plan(unknown, tools))
@@ -41,11 +53,9 @@ def test_plan_validation_rejects_cycles_unknown_tools_and_too_many_steps():
 
 def test_terminal_plan_modes_require_structured_reasons():
     clarification = {"mode": "clarification_needed", "explanation": "Which graph?",
-                     "missing_information": ["graph_id"], "unsupported_capability": "",
-                     "answer_type": "text", "steps": []}
+                     "missing_information": ["graph_id"], "unsupported_capability": "", "steps": []}
     unsupported = {"mode": "unsupported", "explanation": "No Katz tool.",
-                   "missing_information": [], "unsupported_capability": "Katz centrality",
-                   "answer_type": "text", "steps": []}
+                   "missing_information": [], "unsupported_capability": "Katz centrality", "steps": []}
     assert validate_plan(clarification, {}) == []
     assert validate_plan(unsupported, {}) == []
     clarification["missing_information"] = []
@@ -54,10 +64,22 @@ def test_terminal_plan_modes_require_structured_reasons():
     assert any("unavailable capability" in error for error in validate_plan(unsupported, {}))
 
 
+def test_plan_rejects_invented_literal_graph_ids():
+    tools = {"summary": tool("summary")}
+    plan = {"mode": "execute", "explanation": "summarize", "missing_information": [],
+            "unsupported_capability": "", "steps": [
+        {"id": "s", "tool": "summary", "purpose": "summary",
+         "arguments": {"graph_id": "airport_graph"}, "bindings": [], "depends_on": []}
+    ]}
+    errors = validate_plan(plan, tools, valid_graph_ids={"airports", "karate"})
+    assert any("unknown graph_id" in error for error in errors)
+    assert any("airports" in error for error in errors)
+
+
 def test_replan_can_bind_to_completed_evidence_ids():
     tools = {"summary": tool("summary")}
     plan = {"mode": "execute", "explanation": "continue", "missing_information": [],
-            "unsupported_capability": "", "answer_type": "number", "steps": [
+            "unsupported_capability": "", "steps": [
         {"id": "new", "tool": "summary", "purpose": "use subgraph", "arguments": {},
          "bindings": [{"parameter": "graph_id", "step_id": "old", "pointer": "/result_graph_id"}],
          "depends_on": ["old"]}
