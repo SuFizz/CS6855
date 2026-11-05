@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from graphkit.validate import validate
 from orchestrator.agent import Orchestrator
+from orchestrator.planner import _plan_schema
 from orchestrator.query_io import load_queries
 from orchestrator.registry import discover_project_tools
 
@@ -89,6 +90,13 @@ def test_discovers_and_validates_curated_registry():
     assert not failures
 
 
+def test_plan_schema_uses_discovered_names_without_embedded_arguments():
+    tools = discover_project_tools(ROOT)
+    tool_property = _plan_schema(tools)["function"]["parameters"]["properties"]["steps"]["items"]["properties"]["tool"]
+    assert tool_property["enum"] == sorted(tools)
+    assert "{" not in "".join(tool_property["enum"])
+
+
 def test_single_tool_langgraph_answer_and_trace(tmp_path):
     client = FakeClient([
         contract_message("number", ["node count"]),
@@ -127,6 +135,42 @@ def test_interpretation_uses_question_relevant_node_labels(tmp_path):
     assert "edge-disjoint" in client.requests[0]["messages"][0]["content"]
     plan_context = json.loads(client.requests[1]["messages"][1]["content"])
     assert any(hint["graph_id"] == "karate" for hint in plan_context["entity_hints"])
+
+
+def test_finalizer_corrects_answer_type_to_query_contract(tmp_path):
+    plan = [{"id": "node", "tool": "lookup_node", "purpose": "Resolve airport",
+             "arguments": {"graph_id": "airports", "name": "FRA"}, "bindings": [], "depends_on": []}]
+    evidence = [{"step_id": "node", "pointers": ["/result/0/id"]}]
+    client = FakeClient([
+        contract_message("node", ["airport ID"]),
+        plan_message(plan), assessment_message(),
+        answer_message(value='"Frankfurt"', text="Frankfurt", answer_type="text", evidence=evidence),
+        answer_message(value='"FRA"', text="Frankfurt (FRA)", answer_type="node", evidence=evidence),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("type", "Identify the airport with code FRA.", tmp_path / "type.jsonl")
+    assert result["status"] == "answered"
+    assert result["answer"] == {"type": "node", "value": "FRA"}
+
+
+def test_successful_evidence_can_finalize_after_more_than_eight_llm_calls(tmp_path):
+    invalid_contract = contract_message("number", ["node count"], needs_clarification=True)
+    invalid_plan = plan_message([{"id": "summary", "tool": "graph_summary{}", "purpose": "Count nodes",
+                                 "arguments": {}, "bindings": [], "depends_on": []}])
+    corrected = plan_message([{"id": "summary", "tool": "graph_summary", "purpose": "Count nodes",
+                               "arguments": {}, "bindings": [], "depends_on": []}])
+    client = FakeClient([
+        invalid_contract, contract_message("number", ["node count"]),
+        invalid_plan, invalid_plan, corrected,
+        Message([function_call("args", "graph_summary", {"graph_id": "karate"})]),
+        assessment_message(), answer_message(value='"thirty-four"', answer_type="text"), answer_message(),
+    ])
+    trace = tmp_path / "many_llm_calls.jsonl"
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("many_llm_calls", "Return the karate node count.", trace)
+    assert client.calls == 9
+    assert result["status"] == "answered"
+    assert result["answer"] == {"type": "number", "value": 34}
 
 
 def test_missing_plan_arguments_are_filled_using_exact_tool_schema(tmp_path):
@@ -168,6 +212,10 @@ def test_result_graph_id_binding_is_chained(tmp_path):
     assert result["tools_used"] == ["filter_nodes.instructors", expected_summary]
     tool_events = [json.loads(line) for line in trace.read_text().splitlines() if '"type": "tool_call"' in line]
     assert tool_events[1]["arguments"]["graph_id"] == "airports~1"
+    assessment_payload = json.loads(client.requests[2]["messages"][1]["content"])
+    assert any(item["output"]["result_graph_id"] == "airports~1"
+               for item in assessment_payload["executed_tools"])
+    assert "derived subgraph" in client.requests[2]["messages"][0]["content"]
 
 
 def test_interpreter_can_return_clarification_without_tools(tmp_path):
@@ -187,6 +235,8 @@ def test_planner_can_return_unsupported_without_tools(tmp_path):
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("unsupported", "Forecast a stock price.", tmp_path / "unsupported.jsonl")
     assert result["status"] == "unsupported"
+    assert "unavailable data" in client.requests[0]["messages"][0]["content"]
+    assert "dataset attribute" in client.requests[1]["messages"][0]["content"]
 
 
 def test_invented_plan_graph_id_is_corrected_before_execution(tmp_path):

@@ -17,7 +17,7 @@ from .workflow import build_workflow
 class Orchestrator:
     def __init__(self, project_root, *, client=None, model=None, state_dir=None,
                  cache_enabled=True, allow_incomplete_registry=False,
-                 max_tool_calls=5, max_llm_calls=8, max_replans=2):
+                 max_tool_calls=5, max_llm_calls=16, max_replans=2):
         self.project_root = Path(project_root).resolve()
         self.state_dir = Path(state_dir) if state_dir else self.project_root / ".orchestrator"
         self.state_dir.mkdir(parents=True, exist_ok=True)
