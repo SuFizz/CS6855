@@ -19,12 +19,21 @@ class PlanStep(TypedDict):
     depends_on: list[str]
 
 
+class QueryContract(TypedDict):
+    answer_type: Literal["number", "boolean", "node", "node_list", "path", "text"]
+    cardinality: Literal["one", "many"]
+    ordered: bool
+    value_description: str
+    required_outputs: list[str]
+    needs_clarification: bool
+    missing_information: list[str]
+
+
 class Plan(TypedDict):
     mode: Literal["execute", "clarification_needed", "unsupported"]
     explanation: str
     missing_information: list[str]
     unsupported_capability: str
-    answer_type: Literal["number", "boolean", "node", "node_list", "path", "text"]
     steps: list[PlanStep]
 
 
@@ -41,6 +50,7 @@ class OrchestratorState(TypedDict, total=False):
     query_hash: str
     question: str
     trace_path: str
+    query_contract: QueryContract
     plan: Plan
     plan_revision: int
     pending_step_ids: list[str]

@@ -10,6 +10,10 @@ from pathlib import Path
 from graphkit.llm import make_client, model_name
 
 
+class ProviderExhaustedError(RuntimeError):
+    pass
+
+
 def normalise_message(message):
     if hasattr(message, "model_dump"):
         return message.model_dump(exclude_none=True)
@@ -57,6 +61,7 @@ class GeminiProvider:
         self.max_attempts = max_attempts
         self.base_delay = base_delay
         self.sleep = sleep
+        self.exhausted = False
 
     @staticmethod
     def _key(payload):
@@ -98,7 +103,11 @@ class GeminiProvider:
                 if trace:
                     trace.event("llm_error", model=self.model, purpose=purpose, attempt=attempt,
                                 transient=self._transient(exc), error=f"{type(exc).__name__}: {exc}")
-                if attempt >= self.max_attempts or not self._transient(exc):
+                transient = self._transient(exc)
+                if attempt >= self.max_attempts or not transient:
+                    if transient:
+                        self.exhausted = True
+                        raise ProviderExhaustedError(f"Gemini remained unavailable after {attempt} attempts: {type(exc).__name__}: {exc}") from exc
                     raise
                 delay = self.base_delay * (2 ** (attempt - 1)) + random.uniform(0, self.base_delay / 4)
                 self.sleep(delay)

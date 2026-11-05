@@ -54,6 +54,25 @@ def evaluate_candidate(folder, data_dir, repeats=2):
     if len(set(outputs)) != 1:
         return {"status": "rejected", "tool": tool.name, "implementation_id": tool.implementation_id,
                 "path": str(folder), "arguments": arguments, "errors": ["canonical case is nondeterministic"]}
+    if tool.name == "minimum_spanning_tree":
+        directed_store = GraphStore(data_dir)
+        airports = directed_store.get("airports")
+        india = [node for node in airports.nodes() if airports.node_attrs(node).get("country") == "India"]
+        graph_id = directed_store.subgraph("airports", india, "Indian airports")
+        mst_arguments = {"graph_id": graph_id}
+        if "top_k" in tool.manifest.get("parameters", {}).get("properties", {}):
+            mst_arguments["top_k"] = 100
+        mst_output = tool.call(directed_store, **mst_arguments)
+        issue = validate_tool_output(mst_output, directed_store)
+        total = mst_output.get("result", {}).get("total_weight") if isinstance(mst_output.get("result"), dict) else None
+        from graphkit.testing import to_networkx
+        import networkx as nx
+        undirected = to_networkx(directed_store.get(graph_id)).to_undirected()
+        expected_total = nx.minimum_spanning_tree(undirected, weight="weight").size(weight="weight")
+        if issue or mst_output.get("status") != "ok" or total != expected_total:
+            return {"status": "rejected", "tool": tool.name, "implementation_id": tool.implementation_id,
+                    "path": str(folder), "arguments": mst_arguments,
+                    "errors": [issue or mst_output.get("error") or f"directed-view MST total differs from reference {expected_total}"]}
     returns_subgraph = MENU.get(tool.name, (None, None, False))[2]
     return {"status": "eligible", "tool": tool.name, "implementation_id": tool.implementation_id,
             "path": str(folder), "arguments": arguments, "returns_subgraph": returns_subgraph,

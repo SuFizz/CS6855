@@ -137,14 +137,39 @@ def validate_tool_output(output, store):
     return None
 
 
-def validate_plan(plan, tools, max_steps=5, completed_ids=()):
+def validate_query_contract(contract):
+    if not isinstance(contract, dict):
+        return ["Query contract must be an object."]
+    errors = []
+    if contract.get("answer_type") not in ANSWER_TYPES:
+        errors.append("Query contract answer_type is invalid.")
+    if contract.get("cardinality") not in ("one", "many"):
+        errors.append("Query contract cardinality must be one or many.")
+    if not isinstance(contract.get("ordered"), bool):
+        errors.append("Query contract ordered must be boolean.")
+    if not isinstance(contract.get("value_description"), str) or not contract["value_description"].strip():
+        errors.append("Query contract needs a value_description.")
+    required = contract.get("required_outputs")
+    if not isinstance(required, list) or any(not isinstance(item, str) or not item.strip() for item in required):
+        errors.append("Query contract required_outputs must be non-empty strings.")
+    if not isinstance(contract.get("needs_clarification"), bool):
+        errors.append("Query contract needs_clarification must be boolean.")
+    missing = contract.get("missing_information")
+    if not isinstance(missing, list) or any(not isinstance(item, str) or not item.strip() for item in missing):
+        errors.append("Query contract missing_information must be a string list.")
+    if contract.get("needs_clarification") and not missing:
+        errors.append("A clarification contract must identify missing information.")
+    if not contract.get("needs_clarification") and missing:
+        errors.append("A non-clarification contract cannot declare missing information.")
+    return errors
+
+
+def validate_plan(plan, tools, max_steps=5, completed_ids=(), valid_graph_ids=()):
     if not isinstance(plan, dict):
         return ["Plan must be an object."]
     mode = plan.get("mode")
     if mode not in ("execute", "clarification_needed", "unsupported"):
         return ["Plan mode is invalid."]
-    if plan.get("answer_type") not in ANSWER_TYPES:
-        return ["Plan answer_type is invalid."]
     steps = plan.get("steps")
     if not isinstance(steps, list):
         return ["Plan steps must be a list."]
@@ -226,9 +251,13 @@ def validate_plan(plan, tools, max_steps=5, completed_ids=()):
             except (TypeError, ValueError) as exc:
                 errors.append(f"Step {step_id!r} binding for {parameter!r}: {exc}")
             bound.append(parameter)
-        issue = validate_arguments(tools[tool_name].manifest, step.get("arguments", {}), bound, allow_missing=True)
+        arguments = step.get("arguments", {})
+        issue = validate_arguments(tools[tool_name].manifest, arguments, bound, allow_missing=True)
         if issue:
             errors.append(f"Step {step_id!r}: {issue}")
+        graph_id = arguments.get("graph_id") if isinstance(arguments, dict) else None
+        if graph_id is not None and valid_graph_ids and graph_id not in set(valid_graph_ids):
+            errors.append(f"Step {step_id!r} uses unknown graph_id {graph_id!r}; valid graph IDs are {sorted(valid_graph_ids)}.")
     visiting, visited = set(), set()
     def visit(node):
         if node in visiting:

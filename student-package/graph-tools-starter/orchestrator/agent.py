@@ -7,6 +7,7 @@ from pathlib import Path
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from .executor import PlanExecutor
+from .graph_catalogue import build_graph_catalogue, find_entity_hints
 from .provider import GeminiProvider
 from .registry import discover_project_tools
 from .tracing import ProjectTrace
@@ -23,6 +24,7 @@ class Orchestrator:
         self.tools = discover_project_tools(
             self.project_root, allow_incomplete=allow_incomplete_registry,
         )
+        self.graph_catalogue = build_graph_catalogue(self.project_root / "data")
         self.provider = GeminiProvider(
             client=client, model=model, cache_path=self.state_dir / "llm_cache.json",
             cache_enabled=cache_enabled,
@@ -44,7 +46,9 @@ class Orchestrator:
             trace.event("question", query_id=str(query_id), text=question)
         executor = PlanExecutor(self.tools, self.project_root / "data", trace,
                                 provider=self.provider, question=question)
-        graph = build_workflow(provider=self.provider, tools=self.tools, executor=executor, trace=trace)
+        graph = build_workflow(provider=self.provider, tools=self.tools, executor=executor, trace=trace,
+                               graph_catalogue=self.graph_catalogue,
+                               entity_hints=find_entity_hints(self.project_root / "data", question))
         app = graph.compile(checkpointer=self._saver)
         thread_id = self._thread_id(query_id, question)
         config = {"configurable": {"thread_id": thread_id}}

@@ -32,8 +32,8 @@ CASES = {
     "motif_count": {"graph_id": "karate", "top_k": 100},
     "node_embedding_similarity": {"graph_id": "karate", "node": "m1", "top_k": 10, "seed": 0},
     "node_similarity": {"graph_id": "karate", "node": "m1", "other": "m2", "node1": "m1", "node2": "m2", "node_a": "m1", "node_b": "m2", "target_node": "m2"},
-    "pagerank": {"graph_id": "karate", "damping": 0.85, "top_k": 100},
-    "personalized_pagerank": {"graph_id": "karate", "node": "m1", "seed_node": "m1", "seeds": ["m1"], "top_k": 100},
+    "pagerank": {"graph_id": "airports", "damping": 0.85, "top_k": 10, "weighted": False},
+    "personalized_pagerank": {"graph_id": "airports", "node": "MAA", "seed_node": "MAA", "seeds": ["MAA"], "top_k": 10, "use_weights": False, "include_source": False, "exclude_seeds": True},
     "reachability": {"graph_id": "courses", "source": "CS101", "target": "CS405"},
     "shortest_path_unweighted": {"graph_id": "karate", "source": "m1", "target": "m34", "src": "m1", "dest": "m34"},
     "shortest_path_weighted": {"graph_id": "airports", "source": "MAA", "target": "DEL"},
@@ -89,6 +89,38 @@ def _ranking(result):
     return []
 
 
+def _pagerank_unweighted(network, damping=0.85, personalization=None, iterations=500, tolerance=1e-12):
+    nodes = list(network)
+    count = len(nodes)
+    if not nodes:
+        return {}
+    personal = {node: 0.0 for node in nodes}
+    if personalization:
+        for node, value in personalization.items():
+            if node in personal:
+                personal[node] = float(value)
+        total = sum(personal.values())
+        personal = {node: value / total for node, value in personal.items()}
+    else:
+        personal = {node: 1.0 / count for node in nodes}
+    scores = {node: 1.0 / count for node in nodes}
+    for _ in range(iterations):
+        updated = {node: (1.0 - damping) * personal[node] for node in nodes}
+        dangling = sum(scores[node] for node in nodes if network.out_degree(node) == 0)
+        for node in nodes:
+            updated[node] += damping * dangling * personal[node]
+        for source in nodes:
+            neighbors = list(network.successors(source)) if network.is_directed() else list(network.neighbors(source))
+            if neighbors:
+                share = damping * scores[source] / len(neighbors)
+                for target in neighbors:
+                    updated[target] += share
+        if sum(abs(updated[node] - scores[node]) for node in nodes) < tolerance:
+            return updated
+        scores = updated
+    return scores
+
+
 def semantic_check(tool, output, store, arguments):
     import networkx as nx
 
@@ -102,7 +134,18 @@ def semantic_check(tool, output, store, arguments):
         nodes = _find(result, ("nodes", "node_count", "number_of_nodes"))
         edges = _find(result, ("edges", "edge_count", "number_of_edges"))
         return nodes == network.number_of_nodes() and edges == network.number_of_edges(), "node/edge counts differ"
-    if name in ("degree_centrality", "betweenness_centrality", "pagerank", "closeness_centrality"):
+    if name == "pagerank":
+        expected = _pagerank_unweighted(network, damping=arguments.get("damping", 0.85))
+        expected_ids = [node for node, _ in sorted(expected.items(), key=lambda item: (-item[1], item[0]))[:arguments.get("top_k", 10)]]
+        return _ranking(result)[:len(expected_ids)] == expected_ids, "PageRank ranking differs from unweighted reference"
+    if name == "personalized_pagerank":
+        seed = arguments.get("node") or arguments.get("seed_node") or (arguments.get("seeds") or [None])[0]
+        expected = _pagerank_unweighted(network, damping=arguments.get("damping", arguments.get("alpha", 0.85)), personalization={seed: 1.0})
+        ranked = [node for node, _ in sorted(expected.items(), key=lambda item: (-item[1], item[0])) if node != seed]
+        actual = [node for node in _ranking(result) if node != seed]
+        limit = min(arguments.get("top_k", 10), len(ranked))
+        return actual[:limit] == ranked[:limit], "Personalized PageRank differs from unweighted source-excluded reference"
+    if name in ("degree_centrality", "betweenness_centrality", "closeness_centrality"):
         ids = _ranking(result)
         return bool(ids) and len(ids) == len(set(ids)), "ranking is empty or repeats nodes"
     if name == "reachability":

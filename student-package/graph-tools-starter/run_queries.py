@@ -2,6 +2,7 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from orchestrator import Orchestrator, load_queries
@@ -36,6 +37,7 @@ def main():
     parser.add_argument("--retry-errors", action="store_true", help="With --resume, rerun previous error results.")
     parser.add_argument("--no-cache", action="store_true", help="Disable the Gemini response cache.")
     parser.add_argument("--allow-incomplete-registry", action="store_true", help="Warn and continue with missing or duplicate curated tools.")
+    parser.add_argument("--query-delay", type=float, default=2.0, help="Seconds to pause between queries to protect provider quota.")
     args = parser.parse_args()
     output = Path(args.out)
     try:
@@ -54,7 +56,7 @@ def main():
     previous = {item.get("query_id"): item for item in existing if isinstance(item, dict)}
     answers = []
     try:
-        for query in queries:
+        for index, query in enumerate(queries):
             old = previous.get(query["query_id"])
             skip = args.resume and old and (old.get("status") in TERMINAL_STATUSES or
                                               old.get("status") == "error" and not args.retry_errors)
@@ -69,6 +71,11 @@ def main():
                 )
             answers.append(answer)
             _write_atomic(output, answers)
+            if orchestrator.provider.exhausted:
+                print(f"Gemini quota/service remained unavailable; stopped after {query['query_id']}. Resume later with --resume --retry-errors.", file=sys.stderr)
+                break
+            if not skip and args.query_delay > 0 and index < len(queries) - 1:
+                time.sleep(args.query_delay)
     finally:
         orchestrator.close()
     print(f"Wrote {len(answers)} answer(s) to {output}")

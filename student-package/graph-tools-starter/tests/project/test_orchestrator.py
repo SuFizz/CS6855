@@ -26,10 +26,12 @@ class FakeClient:
     def __init__(self, messages):
         self.messages = iter(messages)
         self.calls = 0
+        self.requests = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, **kwargs):
         self.calls += 1
+        self.requests.append(kwargs)
         return SimpleNamespace(choices=[SimpleNamespace(message=next(self.messages))])
 
 
@@ -38,15 +40,36 @@ def function_call(call_id, name, arguments):
             "function": {"name": name, "arguments": json.dumps(arguments)}}
 
 
+def contract_message(answer_type="number", required_outputs=None, *, cardinality="one", ordered=False,
+                     needs_clarification=False, missing_information=None):
+    if required_outputs is None:
+        required_outputs = ["requested answer"]
+    return Message([function_call("contract", "submit_query_contract", {
+        "answer_type": answer_type, "cardinality": cardinality, "ordered": ordered,
+        "value_description": "Structured value requested by the user.",
+        "required_outputs": required_outputs,
+        "needs_clarification": needs_clarification,
+        "missing_information": missing_information or [],
+    })])
+
+
 def plan_message(steps, mode="execute", explanation="Use the required graph tools.", answer_type="number",
-                 missing_information=None, unsupported_capability=""):
+                 missing_information=None, unsupported_capability="", required_outputs=None):
     if mode == "clarification_needed" and missing_information is None:
         missing_information = ["graph_id"]
     if mode == "unsupported" and not unsupported_capability:
         unsupported_capability = "requested graph capability"
     return Message([function_call("plan", "submit_plan", {
         "mode": mode, "explanation": explanation, "missing_information": missing_information or [],
-        "unsupported_capability": unsupported_capability, "answer_type": answer_type, "steps": steps,
+        "unsupported_capability": unsupported_capability, "steps": steps,
+    })])
+
+
+def assessment_message(sufficient=True, missing_outputs=None, unsupported_capability=""):
+    return Message([function_call("assessment", "submit_assessment", {
+        "sufficient": sufficient, "missing_outputs": missing_outputs or [],
+        "unsupported_capability": unsupported_capability,
+        "explanation": "Evidence is sufficient." if sufficient else "More analysis is required.",
     })])
 
 
@@ -68,8 +91,10 @@ def test_discovers_and_validates_curated_registry():
 
 def test_single_tool_langgraph_answer_and_trace(tmp_path):
     client = FakeClient([
+        contract_message("number", ["node count"]),
         plan_message([{"id": "summary", "tool": "graph_summary", "purpose": "Count nodes",
                        "arguments": {"graph_id": "karate"}, "bindings": [], "depends_on": []}]),
+        assessment_message(),
         answer_message(),
     ])
     trace = tmp_path / "q1.jsonl"
@@ -77,17 +102,38 @@ def test_single_tool_langgraph_answer_and_trace(tmp_path):
         result = agent.answer("q1", "How many nodes are in the karate graph?", trace)
     assert result["status"] == "answered"
     assert result["answer"] == {"type": "number", "value": 34}
+    interpretation_payload = json.loads(client.requests[0]["messages"][1]["content"])
+    assert {item["graph_id"] for item in interpretation_payload["available_graphs"]} == {
+        "airports", "karate", "lesmis", "courses", "projects",
+    }
     expected = discover_project_tools(ROOT)["graph_summary"].implementation_id
     assert result["tools_used"] == [expected]
     events = [json.loads(line) for line in trace.read_text().splitlines()]
-    assert [event["type"] for event in events] == ["question", "llm_call", "tool_call", "llm_call", "final_answer"]
+    assert [event["type"] for event in events] == [
+        "question", "llm_call", "llm_call", "tool_call", "llm_call",
+        "evidence_assessment", "llm_call", "final_answer",
+    ]
+
+
+def test_interpretation_uses_question_relevant_node_labels(tmp_path):
+    client = FakeClient([contract_message("number", ["edge-disjoint path count"]),
+                         plan_message([], mode="unsupported", answer_type="text")])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        agent.answer("roles", "How many independent friendship chains connect the instructor and administrator?",
+                     tmp_path / "roles.jsonl")
+    context = json.loads(client.requests[0]["messages"][1]["content"])
+    assert {entry["id"] for hint in context["entity_hints"] if hint["graph_id"] == "karate"
+            for entry in hint["matches"]} >= {"m1", "m34"}
+    assert "edge-disjoint" in client.requests[0]["messages"][0]["content"]
+    plan_context = json.loads(client.requests[1]["messages"][1]["content"])
+    assert any(hint["graph_id"] == "karate" for hint in plan_context["entity_hints"])
 
 
 def test_missing_plan_arguments_are_filled_using_exact_tool_schema(tmp_path):
     incomplete = [{"id": "summary", "tool": "graph_summary", "purpose": "Count karate nodes",
                    "arguments": {}, "bindings": [], "depends_on": []}]
     argument_call = Message([function_call("args", "graph_summary", {"graph_id": "karate"})])
-    client = FakeClient([plan_message(incomplete), argument_call, answer_message()])
+    client = FakeClient([contract_message("number", ["node count"]), plan_message(incomplete), argument_call, assessment_message(), answer_message()])
     trace = tmp_path / "arguments.jsonl"
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("arguments", "How many nodes are in exact graph karate?", trace)
@@ -108,7 +154,9 @@ def test_result_graph_id_binding_is_chained(tmp_path):
          "depends_on": ["filter"]},
     ]
     client = FakeClient([
+        contract_message("text", ["filtered graph summary"]),
         plan_message(steps, answer_type="text"),
+        assessment_message(),
         answer_message(value='"Filtered graph summarized."', text="Filtered graph summarized.",
                        answer_type="text", evidence=[{"step_id": "summary", "pointers": ["/summary"]}]),
     ])
@@ -122,9 +170,9 @@ def test_result_graph_id_binding_is_chained(tmp_path):
     assert tool_events[1]["arguments"]["graph_id"] == "airports~1"
 
 
-def test_planner_can_return_clarification_without_tools(tmp_path):
-    client = FakeClient([plan_message([], mode="clarification_needed",
-                                      explanation="Which graph should I analyze?", answer_type="text")])
+def test_interpreter_can_return_clarification_without_tools(tmp_path):
+    client = FakeClient([contract_message("text", [], needs_clarification=True,
+                                          missing_information=["graph to analyze", "importance definition"])])
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("ambiguous", "Which node is most important?", tmp_path / "ambiguous.jsonl")
     assert result["status"] == "clarification_needed"
@@ -132,35 +180,71 @@ def test_planner_can_return_clarification_without_tools(tmp_path):
 
 
 def test_planner_can_return_unsupported_without_tools(tmp_path):
-    client = FakeClient([plan_message([], mode="unsupported",
-                                      explanation="No graph tool forecasts stocks.", answer_type="text")])
+    client = FakeClient([
+        contract_message("text", ["stock forecast"]),
+        plan_message([], mode="unsupported", explanation="No graph tool forecasts stocks.", answer_type="text"),
+    ])
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("unsupported", "Forecast a stock price.", tmp_path / "unsupported.jsonl")
     assert result["status"] == "unsupported"
 
 
-def test_failed_tool_triggers_bounded_replan(tmp_path):
+def test_invented_plan_graph_id_is_corrected_before_execution(tmp_path):
+    wrong = [{"id": "summary", "tool": "graph_summary", "purpose": "Count airport nodes",
+              "arguments": {"graph_id": "airport_graph"}, "bindings": [], "depends_on": []}]
+    corrected = [{"id": "summary", "tool": "graph_summary", "purpose": "Count airport nodes",
+                  "arguments": {"graph_id": "airports"}, "bindings": [], "depends_on": []}]
+    client = FakeClient([
+        contract_message("number", ["airport node count"]),
+        plan_message(wrong), plan_message(corrected), assessment_message(), answer_message(value="500", text="There are 500 airports."),
+    ])
+    trace = tmp_path / "graph_id.jsonl"
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("graph_id", "How many nodes are in the airport network?", trace)
+    assert result["status"] == "answered"
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert sum(event["type"] == "tool_call" for event in events) == 1
+    assert next(event for event in events if event["type"] == "tool_call")["arguments"]["graph_id"] == "airports"
+
+
+def test_argument_preparation_unknown_graph_becomes_recoverable_error(tmp_path):
+    incomplete = [{"id": "rank", "tool": "pagerank", "purpose": "Rank airports",
+                   "arguments": {}, "bindings": [], "depends_on": []}]
+    invalid_arguments = Message([function_call("args", "pagerank", {"graph_id": "airport_graph", "top_k": 5})])
+    client = FakeClient([
+        contract_message("node_list", ["ranked airport IDs"], cardinality="many", ordered=True),
+        plan_message(incomplete), invalid_arguments,
+        plan_message([], mode="unsupported", explanation="The requested graph is invalid.",
+                     unsupported_capability="requested graph instance"),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("argument_graph", "Rank the airport graph.", tmp_path / "argument_graph.jsonl")
+    assert result["status"] == "error"
+    assert "airport_graph" in result["answer_text"]
+
+
+def test_invented_graph_id_is_corrected_without_wasting_a_tool_call(tmp_path):
     bad = [{"id": "bad", "tool": "graph_summary", "purpose": "Try missing graph",
             "arguments": {"graph_id": "no_such_graph"}, "bindings": [], "depends_on": []}]
     good = [{"id": "summary", "tool": "graph_summary", "purpose": "Count nodes",
              "arguments": {"graph_id": "karate"}, "bindings": [], "depends_on": []}]
-    client = FakeClient([plan_message(bad), plan_message(good), answer_message()])
+    client = FakeClient([contract_message("number", ["node count"]), plan_message(bad), plan_message(good), assessment_message(), answer_message()])
     trace = tmp_path / "replan.jsonl"
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("replan", "How many karate nodes?", trace)
     assert result["status"] == "answered"
     events = [json.loads(line) for line in trace.read_text().splitlines()]
-    assert any(event["type"] == "replan" for event in events)
-    assert sum(event["type"] == "tool_call" for event in events) == 2
+    assert any(event["type"] == "plan_validation_error" for event in events)
+    assert sum(event["type"] == "tool_call" for event in events) == 1
 
 
 def test_missing_graph_failure_remains_error_when_replanner_says_unsupported(tmp_path):
     bad = [{"id": "summary", "tool": "graph_summary", "purpose": "Summarize exact graph",
             "arguments": {"graph_id": "no_such_graph"}, "bindings": [], "depends_on": []}]
     client = FakeClient([
-        plan_message(bad),
-        plan_message([], mode="unsupported", explanation="The graph does not exist.",
-                     answer_type="text", unsupported_capability="requested graph instance"),
+        contract_message("text", ["graph summary"]),
+        plan_message(bad, answer_type="text"),
+        plan_message([], mode="unsupported", explanation="The graph does not exist.",                     answer_type="text", unsupported_capability="requested graph instance"),
     ])
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("missing_graph", "Summarize exact graph no_such_graph.", tmp_path / "missing_graph.jsonl")
@@ -173,9 +257,9 @@ def test_missing_node_failure_remains_error_when_replanner_says_unsupported(tmp_
             "arguments": {"graph_id": "karate", "node": "m999", "k": 2},
             "bindings": [], "depends_on": []}]
     client = FakeClient([
-        plan_message(bad),
-        plan_message([], mode="unsupported", explanation="The node does not exist.",
-                     answer_type="text", unsupported_capability="requested node instance"),
+        contract_message("text", ["two-hop neighborhood"]),
+        plan_message(bad, answer_type="text"),
+        plan_message([], mode="unsupported", explanation="The node does not exist.",                     answer_type="text", unsupported_capability="requested node instance"),
     ])
     with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
         result = agent.answer("missing_node", "Use exact node m999 in karate.", tmp_path / "missing_node.jsonl")
@@ -183,10 +267,71 @@ def test_missing_node_failure_remains_error_when_replanner_says_unsupported(tmp_
     assert "m999" in result["answer_text"]
 
 
+def test_insufficient_metadata_evidence_triggers_analytical_replan(tmp_path):
+    metadata_plan = [{"id": "graphs", "tool": "list_graphs", "purpose": "Inspect graph metadata",
+                      "arguments": {}, "bindings": [], "depends_on": []}]
+    analytical_plan = [{"id": "components", "tool": "strongly_connected_components",
+                        "purpose": "Test mutual reachability", "arguments": {"graph_id": "airports"},
+                        "bindings": [], "depends_on": []}]
+    client = FakeClient([
+        contract_message("boolean", ["strong connectivity boolean"]),
+        plan_message(metadata_plan, answer_type="boolean", required_outputs=["strong connectivity boolean"]),
+        assessment_message(False, ["strong connectivity boolean"]),
+        plan_message(analytical_plan, answer_type="boolean", required_outputs=["strong connectivity boolean"]),
+        assessment_message(),
+        answer_message(value="true", text="Every airport is mutually reachable.", answer_type="boolean",
+                       evidence=[{"step_id": "components", "pointers": ["/summary"]}]),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("sufficiency", "Can every airport reach every other airport?", tmp_path / "sufficiency.jsonl")
+    assert result["status"] == "answered"
+    assert result["answer"] == {"type": "boolean", "value": True}
+    assert len(result["tools_used"]) == 2
+
+
+def test_empty_full_phrase_lookup_replans_with_exact_code_token(tmp_path):
+    first = [{"id": "lookup_full", "tool": "lookup_node", "purpose": "Resolve destination",
+              "arguments": {"graph_id": "airports", "name": "New York JFK"},
+              "bindings": [], "depends_on": []}]
+    retry = [{"id": "lookup_code", "tool": "lookup_node", "purpose": "Resolve exact code token",
+              "arguments": {"graph_id": "airports", "name": "JFK"},
+              "bindings": [], "depends_on": []}]
+    client = FakeClient([
+        contract_message("node", ["destination airport ID"]),
+        plan_message(first), plan_message(retry), assessment_message(),
+        answer_message(value='"JFK"', text="The destination is JFK.", answer_type="node",
+                       evidence=[{"step_id": "lookup_code", "pointers": ["/result/0/id"]}]),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("jfk", "Find New York JFK.", tmp_path / "jfk.jsonl")
+    assert result["status"] == "answered"
+    assert result["answer"] == {"type": "node", "value": "JFK"}
+    events = [json.loads(line) for line in (tmp_path / "jfk.jsonl").read_text().splitlines()]
+    lookup_calls = [event for event in events if event["type"] == "tool_call"]
+    assert [event["arguments"]["name"] for event in lookup_calls] == ["New York JFK", "JFK"]
+
+
+def test_ambiguous_lookup_routes_to_clarification(tmp_path):
+    lookup = [{"id": "paris", "tool": "lookup_node", "purpose": "Resolve Paris airport",
+               "arguments": {"graph_id": "airports", "name": "Paris"}, "bindings": [], "depends_on": []}]
+    client = FakeClient([
+        contract_message("path", ["source airport id", "destination airport id", "route"], ordered=True),
+        plan_message(lookup, answer_type="path", required_outputs=["source airport id"]),
+        plan_message([], mode="clarification_needed", explanation="Which Paris airport?",
+                     answer_type="text", missing_information=["Paris airport"]),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model", state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer("paris", "Find a route from Paris.", tmp_path / "paris.jsonl")
+    assert result["status"] == "clarification_needed"
+    assert result["tools_used"] == ["lookup_node.instructors"]
+
+
 def test_completed_query_resumes_without_another_provider_call(tmp_path):
     first_client = FakeClient([
+        contract_message("number", ["node count"]),
         plan_message([{"id": "summary", "tool": "graph_summary", "purpose": "Count nodes",
                        "arguments": {"graph_id": "karate"}, "bindings": [], "depends_on": []}]),
+        assessment_message(),
         answer_message(),
     ])
     trace = tmp_path / "resume.jsonl"
