@@ -73,18 +73,17 @@ and \tool{LLM\_API\_KEY} supplies the key through the environment. The required 
 
 \section{Registry selection}
 The local curation report evaluated \textbf{186 candidates}; 167 passed its checks and one implementation was
-selected for each of \textbf{33 analytical tools}. Four infrastructure tools remain separate. Among eligible
-candidates the lowest median runtime wins, with implementation ID as the tie-breaker. Selection is
-machine-dependent, so the curated registry must accompany the submission. Rejected candidates were
-investigated individually: some initial rejections were evaluator/output-shape false positives, not tool bugs.
+selected for each of \textbf{33 analytical tools}. Four infrastructure tools remain separate. The initial
+selection used the lowest median runtime among eligible candidates, with implementation ID as a tie-breaker.
+Because that choice is machine-dependent, the submitted \tool{registry/tools/} must be checked against the
+implementation IDs recorded in \tool{answers\_public.json} and its traces, rather than rebuilt by speed alone.
+Some initial rejections were evaluator/output-shape false positives, not tool bugs.
 
 \clearpage
 \section{Public-set evaluation}
 The public set contains 30 questions. We compare status, structured type and value against the supplied
 public expectations (0.1\% tolerance for numbers; ranking order where relevant). The figures below are the
-\emph{best trace-backed terminal results across recorded attempts}, not one uninterrupted run. In
-particular, the old q26 clarification from \tool{answers\_public\_v5.json} was deliberately \emph{not}
-selected; its later error is counted.
+\emph{best trace-backed terminal results across recorded attempts}, not one uninterrupted run.
 
 \begin{center}
 \begin{tabularx}{0.93\linewidth}{@{}l r X@{}}
@@ -156,9 +155,14 @@ course's discussion channel without sharing source code.
 
 \section{Member contributions}
 \begin{itemize}
-\item \textbf{Abhinand Shaji (ED22B044):} Improved executor reliability during replanning by reusing a unique node ID from prior evidence when the tool and graph match, and constrained generated node arguments to exact entity hints or dependency outputs. Added regression coverage for this behavior. Investigated q26's ambiguity, clarified that ``close'' requires a chosen metric (fewest hops, weighted distance, or similarity), and added tests for clarification and unweighted shortest paths.
-\item \textbf{Syed Sufiyan (NS26Z168):} Orchestrator integration and public-set evaluation;
-  Assignment~3 node-similarity, diameter/eccentricity and betweenness implementations.
+\item \textbf{Abhinand Shaji (ED22B044):} Curated and tested the registry tools. Improved executor
+  replanning by reusing a unique node ID from prior evidence when the tool and graph match; constrained
+  generated node arguments to exact entity hints or dependency outputs, with regression tests. Investigated
+  q26's ambiguity and added clarification and unweighted-path tests.
+\item \textbf{Syed Sufiyan (NS26Z168):} Built and integrated the manifest-driven orchestrator: graph
+  catalogue and entity hints, structured query interpretation and planning, multi-tool subgraph chaining,
+  evidence-bound answers and status handling, retry/cache and checkpointed tracing, the batch runner,
+  offline public scoring, and regression tests. Ran and analysed repeated public-set evaluations.
 \item \textbf{Mohd Hamza (PH22B016):} Code review and independent reference checks, failure analysis,
   registry bug investigation and clean-setup review. Wrote this report.
 \end{itemize}
@@ -166,3 +170,4 @@ course's discussion channel without sharing source code.
 \textbf{AI-use acknowledgment.} AI-assisted coding was used. The group remains responsible for
 validating its outputs and explaining the submitted implementation.
 \end{document}
+
