@@ -6,10 +6,9 @@ A Gemini-powered LangGraph orchestrator that plans, executes and chains manifest
 
 - Python 3.10 or newer
 - A Google Gemini API key (OpenAI-compatible function calling)
+- The published `Registry.zip`, to build the curated registry (see below)
 
 The API key is read from the environment variable **`LLM_API_KEY`** (directly, or from a `.env` file). The provider and model are set with `LLM_BASE_URL` and `LLM_MODEL`. Never commit an API key.
-
-The curated registry (one implementation per tool) is already included in `registry/tools/`, so `Registry.zip` is only needed if you want to redo the curation.
 
 ## Setup
 
@@ -30,30 +29,30 @@ LLM_MODEL=gemini-3.8-flash
 
 Instead of a `.env` file you can export the variable: `export LLM_API_KEY=your-key`.
 
-## Curated registry
+## Curate Registry.zip
 
-`registry/tools/` already contains the selected implementation of each of the 33 tools, copied unchanged from `Registry.zip`. Check it with:
-
-```bash
-python curate_registry.py verify
-```
-
-To redo the curation, extract `Registry.zip` anywhere and point `--source` at its `tools/` folder. Curation runs every implementation through the course validator, a canonical workload, a NetworkX-based check and a determinism check, and selects the fastest eligible one per tool:
+The runtime loads exactly one implementation per tool from `registry/tools/`, which you build once from `Registry.zip`. Extract `Registry.zip` anywhere and point `--source` at its `tools/` folder. Curation runs every implementation through the course validator, a canonical workload, a NetworkX-based check and a determinism check, and selects the fastest eligible one per tool:
 
 ```bash
 python curate_registry.py evaluate \
   --source <path to extracted Registry.zip>/tools \
   --report .orchestrator/curation_report.json \
   --selection .orchestrator/registry_selection.json
+```
 
+Review or override `.orchestrator/registry_selection.json`, then create the registry and check it:
+
+```bash
 python curate_registry.py materialize \
   --source <path to extracted Registry.zip>/tools \
   --selection .orchestrator/registry_selection.json \
   --dest registry/tools \
   --replace
+
+python curate_registry.py verify
 ```
 
-Because selection is by speed, a new run on another machine may pick a different (equally eligible) implementation. The committed `registry/tools/` is the version our public-set traces use. Strict verification requires one implementation for all 33 analytical tools plus the four instructor infrastructure tools.
+Registry source files are copied unchanged. Strict verification requires one implementation for all 33 analytical tools plus the four instructor infrastructure tools; `run_queries.py` refuses to start until `registry/tools/` passes it. Because selection is by speed, a run on another machine may pick a different, equally eligible implementation.
 
 ## Run
 
@@ -121,6 +120,8 @@ Each trace contains the question, every Gemini call or provider error, plan revi
 
 ## Test
 
+Build `registry/tools/` first (see "Curate Registry.zip"); most orchestration tests load the curated registry.
+
 ```bash
 python -m pytest tests
 python curate_registry.py verify
@@ -141,7 +142,7 @@ orchestrator/executor.py        bindings, tool calls and GraphStore replay
 orchestrator/workflow.py        LangGraph state machine
 orchestrator/provider.py        Gemini retries and cache
 orchestrator/tracing.py         append-safe JSONL traces
-registry/tools/                 curated one-implementation-per-tool registry (committed)
+registry/tools/                 curated one-implementation-per-tool registry (built from Registry.zip)
 queries_public.json             official public question set
 tests/project/                  orchestration and curation tests
 ```
