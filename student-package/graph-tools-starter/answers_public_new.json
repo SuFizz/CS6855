@@ -170,7 +170,7 @@
   {
     "query_id": "q12",
     "status": "answered",
-    "answer_text": "The Jaccard similarity of Valjean's (c74) and Javert's (c40) connections is 0.432432, based on 16 common neighbors.",
+    "answer_text": "The Jaccard similarity of Valjean's (c74) and Javert's (c40) connections in the lesmis graph is 0.432432, based on their 16 common neighbors.",
     "answer": {
       "type": "number",
       "value": 0.432432
