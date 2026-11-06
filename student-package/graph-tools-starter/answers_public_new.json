@@ -37,7 +37,7 @@
       "lookup_node.instructors",
       "shortest_path_unweighted.8809b513"
     ],
-    "trace_file": "traces/public-v5/q03.jsonl"
+    "trace_file": "traces/public-new/q03.jsonl"
   },
   {
     "query_id": "q04",
