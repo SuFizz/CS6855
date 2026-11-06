@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Group 2 — Graph Analytics Orchestrator: Project Report</title>
+<style>
+  @page { size: A4; margin: 16mm 18mm; }
+  body { font: 10.5pt/1.32 Arial, Helvetica, sans-serif; color: #17212b; max-width: 850px; margin: 0 auto; }
+  section { break-after: page; page-break-after: always; }
+  section:last-child { break-after: auto; page-break-after: auto; }
+  h1 { font-size: 18pt; margin: 0 0 4mm; }
+  h2 { font-size: 13pt; border-bottom: 1px solid #b8c1cb; padding-bottom: 1mm; margin: 6mm 0 2mm; }
+  h3 { font-size: 11pt; margin: 4mm 0 1mm; }
+  p, ul, ol { margin: 2mm 0; }
+  li { margin-bottom: 1mm; }
+  table { width: 100%; border-collapse: collapse; margin: 3mm 0; font-size: 9.5pt; }
+  th, td { padding: 2mm; text-align: left; vertical-align: top; border: 1px solid #c8d0d8; }
+  th { background: #edf1f5; }
+  code { font-family: Menlo, Consolas, monospace; font-size: 9pt; }
+  .meta, .note { color: #44515f; }
+  @media print { body { max-width: none; } }
+</style>
+</head>
+<body>
+<section>
+  <h1>Graph Analytics Orchestrator</h1>
+  <p class="meta">Group 2 · CS6855 Course Project · Public-set evaluation · November 2026</p>
+  <p class="meta">Pallepogu Rishi · Abhinand Shaji · Pervaje Surya Prasad Bhat · Syed Sufiyan · Mohd Hamza</p>
+  <h2>1. Design</h2>
+  <p>The system answers natural-language questions over the provided graphs by discovering a curated collection of graph tools, planning bounded tool calls, chaining intermediate graphs, and grounding structured answers in recorded tool results. It uses a LangGraph workflow and an OpenAI-compatible Gemini interface. The API key is read from <code>LLM_API_KEY</code>; it is not included in the submission.</p>
+  <ol>
+    <li><b>Curate and discover:</b> An offline evaluator checks manifests, output contracts, deterministic repeated runs and independent semantic cases. It selects one implementation per official analytical tool and copies it unchanged into <code>registry/tools/</code>. At startup the orchestrator reads those manifests plus four instructor infrastructure tools. No student implementation is chosen by a query-specific runtime rule.</li>
+    <li><b>Interpret:</b> A structured query contract records the expected answer type, ordering, required facts and genuine user ambiguities. A dynamic graph catalogue supplies exact graph IDs, descriptions and attributes. Bounded, question-relevant node-label matches help resolve references without making them evidence for the final answer.</li>
+    <li><b>Plan:</b> Gemini proposes an acyclic dependency graph of at most five tool calls. Tool names come from discovered manifests; literal graph IDs and dependency pointers are validated before execution. A plan may instead declare <code>clarification_needed</code> or <code>unsupported</code>.</li>
+    <li><b>Execute and assess:</b> Ready steps run sequentially against one GraphStore. JSON Pointer bindings pass node IDs or a tool's <code>/result_graph_id</code> into later steps. Successful outputs are checked against the tool contract. A separate evidence assessment requests more analysis if required facts are missing; failures trigger bounded replanning.</li>
+    <li><b>Finalize and recover:</b> The final structured value must match the query contract and cite real output paths. JSONL traces retain LLM calls, tool arguments/results and final answers. A SQLite checkpoint, response cache, provider retry and tool replay support interrupted runs.</li>
+  </ol>
+  <h2>2. Registry selection</h2>
+  <p>The local curation report evaluated <b>186 candidate implementations</b> and selected one implementation for each of the <b>33 analytical tools</b>; the four infrastructure tools remain separate. Passing a schema check alone was not sufficient: selected tools also needed the expected behavior, bounded output and useful chaining semantics. Published registry source files were not edited.</p>
+</section>
+<section>
+  <h2>3. Public-set results</h2>
+  <p>The public set has 30 questions. Answers were checked against the supplied public expectations: numeric tolerance 0.1%, exact structured status/type, node IDs, ranked order where specified, and prerequisite-valid topological orders. The table reports the <b>best matching terminal answers with authentic traces across recorded attempts</b>, not the outcome of a single uninterrupted batch. The earlier q26 clarification from <code>answers_public_v5.json</code> was <b>deliberately excluded</b>; the later q26 error is counted instead.</p>
+  <table>
+    <tr><th>Expected class</th><th>Correct / total</th><th>Selected outcome</th></tr>
+    <tr><td>Answerable (q01–q23)</td><td>19 / 23</td><td>19 answered correctly; q12, q17, q21 and q22 ended in error</td></tr>
+    <tr><td>Ambiguous (q24–q26)</td><td>2 / 3</td><td>q24 and q25 clarified; q26 ended in error</td></tr>
+    <tr><td>Unsupported (q27–q30)</td><td>4 / 4</td><td>All four correctly unsupported</td></tr>
+    <tr><th>Total</th><th>25 / 30 (83.3%)</th><th>19 answered, 2 clarification_needed, 4 unsupported, 5 error</th></tr>
+  </table>
+  <p>Two further answer JSON entries (q12 and q21) have correct structured values, but their corresponding traces still end in <code>error</code>. They are <b>not counted</b> because the project requires trace support for an answer. Counting JSON alone, and still excluding the old q26 answer, would give 27/30; that is not the trace-backed result. No hidden-set accuracy is claimed.</p>
+  <h2>4. Failure analysis</h2>
+  <ul>
+    <li><b>q12 — exhausted finalization budget:</b> A successful similarity call returned a Valjean–Javert Jaccard score of 0.432432, but earlier attempts passed character names where node IDs were required. The LLM-call budget expired before a terminal answer was recorded. Correct numerical evidence alone did not make this run correct.</li>
+    <li><b>q17 — evidence scope misjudged:</b> Degree centrality on an instructor ego subgraph ranked m1 first and m2 next. The question asked for the most connected <i>friend</i>, excluding m1. The assessor incorrectly called that derived-subgraph ranking a global ranking and replanning exhausted its limit. A later run still lacked a matching successful terminal answer.</li>
+    <li><b>q22 — incomplete multi-step plan:</b> Triangle counting in Javert's immediate circle requires resolving Javert, constructing an ego subgraph, then running a motif-count tool. A prior plan embedded arguments in tool-name strings; a later attempt called clustering tools instead and hit the replan limit. No supported terminal number was obtained.</li>
+    <li><b>q21 — provider interruption:</b> Javert (c40) appears in JSON, but its reused trace ends in a rate-limited error. It needs a matching successful terminal trace.</li>
+    <li><b>q26 — ambiguity pursued as a computation:</b> “How close” could mean hops, shared chapters or neighbourhood similarity. The later run tried weighted shortest-path steps and failed instead of asking for clarification. Shared-chapter counts describe link strength, not distance; the earlier clarification is intentionally not used.</li>
+  </ul>
+</section>
+<section>
+  <h2>5. Registry implementation observations</h2>
+  <p>These observations concern <i>unselected</i> candidate implementations tested locally. They are separate from the orchestrator failures above. No registry source was modified.</p>
+  <table>
+    <tr><th>Candidate</th><th>Verified behavior</th><th>Assessment</th></tr>
+    <tr><td><code>motif_count.7cc0c2d7</code></td><td>Reports 52 triangles for the Karate graph; independent NetworkX counting gives 45. Its enumeration mixes node-list and lexicographic order.</td><td><b>Major correctness bug:</b> an apparently successful result is wrong.</td></tr>
+    <tr><td><code>minimum_spanning_tree.5c98c8eb</code></td><td>On <code>lesmis</code> with valid <code>top_k=100</code>, serializes to 8,717 bytes, above the 8,192-byte tool-output limit.</td><td><b>Contract/size bug:</b> only appears for larger result requests.</td></tr>
+    <tr><td><code>maximal_cliques.ab9fb3a3</code></td><td>For valid <code>top_k=100</code> on Karate it returns an explicit size-limit error rather than a bounded preview.</td><td>Minor usability limitation, <b>not</b> an incorrect algorithm result or an output-size violation.</td></tr>
+  </table>
+  <p>A minimal motif-count reproduction uses the Karate induced subgraph on <code>m2, m3, m14</code>: it contains one triangle, but <code>motif_count.7cc0c2d7</code> reports two. The third-node loop compares node ID strings after the first two were ordered by their positions in the node list; those orders disagree for <code>m14</code> and <code>m2</code>.</p>
+  <p>Other candidates initially flagged by the local evaluator were checked before attribution: some output-shape differences had been misread by the evaluator. They are not reported as implementation bugs. The confirmed issues above should be discussed through the course's General Discussion channel without sharing source code.</p>
+  <h2>6. Member contributions</h2>
+  <p>Member names and IDs follow the group's TeX draft. Verify the three marked contributions with the team before submission; do not submit the placeholders.</p>
+  <table>
+    <tr><th>Member</th><th>Contribution</th></tr>
+    <tr><td>Pallepogu Rishi (CS23B048)</td><td>[Confirm actual contribution]</td></tr>
+    <tr><td>Abhinand Shaji (ED22B044)</td><td>[Confirm actual contribution]</td></tr>
+    <tr><td>Pervaje Surya Prasad Bhat (ED23B035)</td><td>[Confirm actual contribution]</td></tr>
+    <tr><td>Syed Sufiyan (NS26Z168)</td><td>Orchestrator integration and public-set evaluation; Assignment 3 graph tools for similarity, diameter/eccentricity and betweenness.</td></tr>
+    <tr><td>Mohd Hamza (PH22B016)</td><td>Code review, independent reference checks, failure and registry-bug analysis, clean-setup review and report drafting (per group draft).</td></tr>
+  </table>
+  <p class="note">AI-assisted coding was used; the group remains responsible for explaining and validating its submitted code and results.</p>
+</section>
+</body>
+</html>
+
