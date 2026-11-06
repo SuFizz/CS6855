@@ -91,28 +91,22 @@ selected; its later error is counted.
 \toprule
 Expected class & Correct & Selected outcomes \\
 \midrule
-Answerable, q01--q23 & 19/23 & 19 answered correctly; q12, q17, q21 and q22 ended in error. \\
+Answerable, q01--q23 & 20/23 & 20 correct answers; q17 and q22 errored, q21 answered incorrectly. \\
 Ambiguous, q24--q26 & 2/3 & q24 and q25 clarified; q26 ended in error. \\
 Unsupported, q27--q30 & 4/4 & All four correctly returned unsupported. \\
 \midrule
-\textbf{Total} & \textbf{25/30 (83.3\%)} & 19 answered, 2 clarification, 4 unsupported, 5 error. \\
+\textbf{Total} & \textbf{26/30 (86.7\%)} & 21 answered (20 correct), 2 clarification, 4 unsupported, 3 error. \\
 \bottomrule
 \end{tabularx}
 \end{center}
 
-Two further JSON entries, q12 and q21, contain correct values but their corresponding archived traces do
-not end with matching successful final-answer events; under the project trace rule they are \emph{not}
-counted. JSON-only selection across attempts would reach 27/30 after excluding old q26, but is not the
-trace-backed result. We make no hidden-set accuracy claim. Most successful answers use one or two tools;
-complex questions use chaining within the five-call tool budget.
+The q12 answer and trace agree on a Jaccard similarity of 0.432432, so q12 is counted.
+The q21 answer and trace both give c63, but that value comes from betweenness on the entire
+\tool{lesmis} graph, not Valjean's circle; the expected local answer is c40. We make no
+hidden-set accuracy claim. Most successful answers use one or two tools within the five-call budget.
 
 \section{Analysis of remaining failures}
 \begin{enumerate}
-\item \textbf{q12: correct result, exhausted finalization budget.} A successful similarity tool call gave
-  the Valjean--Javert Jaccard score 0.432432 (16 common neighbours). Earlier plans supplied character
-  names instead of node IDs and consumed retries; the recorded final status remained error despite
-  the later correct evidence. A larger LLM-call budget and exact-ID handling help, but a matching terminal
-  answer/trace is still needed.
 \item \textbf{q17: derived-subgraph scope was misjudged.} An ego-network call registered the instructor's
   local graph; degree centrality on it ranked m1 first and m2 highest among m1's friends. Evidence
   assessment mistakenly treated the result as a ranking on the whole original graph. Further replanning
@@ -123,9 +117,11 @@ complex questions use chaining within the five-call tool budget.
   inside tool names; later attempts chose clustering tools and exhausted replanning. The expected count
   for the full ego subgraph is 96 triangles; a local coefficient or triangles through Javert alone
   cannot substitute for that result.
-\item \textbf{q21: provider interruption.} An archived JSON result names Javert (c40), but a reused
-  trace still ends in an earlier rate-limited error. This is not credited until a new, matching
-  terminal answer and supporting trace are produced.
+\item \textbf{q21: wrong graph for the calculation.} Betweenness was calculated on all 77
+  \tool{lesmis} characters, making Myriel (c63) rank second globally. The workflow then built
+  Valjean's neighbour graph without recalculating betweenness there. Instead it should calculate
+  betweenness on Valjean's 37-node ego graph (including Valjean), then exclude Valjean only when
+  choosing the answer. That calculation ranks Javert (c40) next, at 0.062634.
 \item \textbf{q26: ambiguity incorrectly pursued as a computation.} ``How close'' could mean hops,
   co-appearance strength or neighbourhood similarity. The later run tried weighted shortest-path
   steps and ended in error rather than requesting clarification. A shared-chapter weight represents
@@ -161,12 +157,17 @@ course's discussion channel without sharing source code.
 \section{Member contributions}
 \begin{itemize}
 \item \textbf{Pallepogu Rishi (CS23B048):} [Confirm actual contribution before submission.]
-\item \textbf{Abhinand Shaji (ED22B044):} Improved executor reliability during replanning by reusing a unique node ID from prior evidence when the tool and graph match, and constrained generated node arguments to exact entity hints or dependency outputs. Added regression coverage for this behavior. Investigated q26's ambiguity, clarified that ``close'' requires a chosen metric (fewest hops, weighted distance, or similarity), and added tests for clarification and unweighted shortest paths.
+\item \textbf{Abhinand Shaji (ED22B044):} Curated and tested the registry tools. Improved executor
+  replanning by reusing a unique node ID from prior evidence when the tool and graph match; constrained
+  generated node arguments to exact entity hints or dependency outputs, with regression tests. Investigated
+  q26's ambiguous meaning of ``close'' and added clarification and unweighted-path tests.
 \item \textbf{Pervaje Surya Prasad Bhat (ED23B035):} [Confirm actual contribution before submission.]
-\item \textbf{Syed Sufiyan (NS26Z168):} Orchestrator integration and public-set evaluation;
-  Assignment~3 node-similarity, diameter/eccentricity and betweenness implementations.
+\item \textbf{Syed Sufiyan (NS26Z168):} Built and integrated the manifest-driven orchestrator: graph
+  catalogue and entity hints, structured query interpretation and planning, multi-tool subgraph chaining,
+  evidence-bound answers and status handling, retry/cache and checkpointed tracing, the batch runner,
+  offline public scoring, and regression tests. Ran and analysed repeated public-set evaluations.
 \item \textbf{Mohd Hamza (PH22B016):} Code review and independent reference checks, failure analysis,
-  registry bug investigation, clean-setup review and report drafting (as listed in the team's draft).
+  registry bug investigation and clean-setup review. Wrote this report.
 \end{itemize}
 
 \textbf{AI-use acknowledgment.} AI-assisted coding was used. The group remains responsible for
