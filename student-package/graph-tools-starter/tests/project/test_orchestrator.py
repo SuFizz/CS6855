@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
+from graphkit import GraphStore
 from graphkit.validate import validate
 from orchestrator.agent import Orchestrator
 from orchestrator.planner import _plan_schema
@@ -139,6 +139,37 @@ def test_interpretation_uses_question_relevant_node_labels(tmp_path):
     assert any(hint["graph_id"] == "karate" for hint in plan_context["entity_hints"])
 
 
+def test_ambiguous_closeness_requests_metric_clarification(tmp_path):
+    client = FakeClient([
+        contract_message(
+            "text", [], needs_clarification=True,
+            missing_information=["fewest relationship steps, weighted path cost, or similarity"],
+        ),
+    ])
+    with Orchestrator(ROOT, client=client, model="test-model",
+                      state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer(
+            "q26_clarification", "How close are Marius and Cosette?",
+            tmp_path / "q26_clarification.jsonl",
+        )
+
+    assert result["status"] == "clarification_needed"
+    assert result["tools_used"] == []
+    prompt = client.requests[0]["messages"][0]["content"]
+    assert "fewest relationship steps" in prompt
+    assert "similarity measure" in prompt
+
+
+def test_unweighted_shortest_path_returns_fewest_hops_for_les_miserables():
+    tool = discover_project_tools(ROOT)["shortest_path_unweighted"]
+    store = GraphStore(ROOT / "data")
+    result = tool.call(store, graph_id="lesmis", source="c50", target="c19")
+
+    assert result["status"] == "ok"
+    assert result["result"]["hops"] == 1
+    assert [node["id"] for node in result["result"]["path"]] == ["c50", "c19"]
+
+
 def test_finalizer_corrects_answer_type_to_query_contract(tmp_path):
     plan = [{"id": "node", "tool": "lookup_node", "purpose": "Resolve airport",
              "arguments": {"graph_id": "airports", "name": "FRA"}, "bindings": [], "depends_on": []}]
@@ -188,6 +219,37 @@ def test_missing_plan_arguments_are_filled_using_exact_tool_schema(tmp_path):
     tool_event = next(event for event in events if event["type"] == "tool_call")
     assert tool_event["arguments"] == {"graph_id": "karate"}
     assert any(event.get("purpose") == "arguments:summary" for event in events if event["type"] == "llm_call")
+
+
+def test_replanned_executor_reuses_node_id_from_matching_evidence(tmp_path):
+    steps = [
+        {"id": "known_ego", "tool": "ego_network", "purpose": "Find the karate instructor's circle",
+         "arguments": {"graph_id": "karate", "node": "m1"}, "bindings": [], "depends_on": []},
+        {"id": "repeated_ego", "tool": "ego_network", "purpose": "Recheck the same instructor's circle",
+         "arguments": {"graph_id": "karate"}, "bindings": [], "depends_on": []},
+    ]
+    client = FakeClient([
+        contract_message("number", ["ego network node count"]),
+        plan_message(steps),
+        assessment_message(),
+        answer_message(value="18", text="The ego network has 18 members.",
+                       evidence=[{"step_id": "repeated_ego", "pointers": ["/summary"]}]),
+    ])
+    trace = tmp_path / "invented_node.jsonl"
+    with Orchestrator(ROOT, client=client, model="test-model",
+                      state_dir=tmp_path / "state", cache_enabled=False) as agent:
+        result = agent.answer(
+            "reused_node", "How many members are in the karate instructor's circle?", trace,
+        )
+
+    assert result["status"] == "answered"
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    tool_events = [event for event in events if event["type"] == "tool_call"]
+    assert [event["arguments"]["node"] for event in tool_events] == ["m1", "m1"]
+    assert sum(
+        event.get("purpose") == "arguments:repeated_ego" and event["type"] == "llm_call"
+        for event in events
+    ) == 0
 
 
 def test_result_graph_id_binding_is_chained(tmp_path):
