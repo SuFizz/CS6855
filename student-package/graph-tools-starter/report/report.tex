@@ -156,16 +156,9 @@ course's discussion channel without sharing source code.
 
 \section{Member contributions}
 \begin{itemize}
-\item \textbf{Pallepogu Rishi (CS23B048):} [Confirm actual contribution before submission.]
-\item \textbf{Abhinand Shaji (ED22B044):} Curated and tested the registry tools. Improved executor
-  replanning by reusing a unique node ID from prior evidence when the tool and graph match; constrained
-  generated node arguments to exact entity hints or dependency outputs, with regression tests. Investigated
-  q26's ambiguous meaning of ``close'' and added clarification and unweighted-path tests.
-\item \textbf{Pervaje Surya Prasad Bhat (ED23B035):} [Confirm actual contribution before submission.]
-\item \textbf{Syed Sufiyan (NS26Z168):} Built and integrated the manifest-driven orchestrator: graph
-  catalogue and entity hints, structured query interpretation and planning, multi-tool subgraph chaining,
-  evidence-bound answers and status handling, retry/cache and checkpointed tracing, the batch runner,
-  offline public scoring, and regression tests. Ran and analysed repeated public-set evaluations.
+\item \textbf{Abhinand Shaji (ED22B044):} Improved executor reliability during replanning by reusing a unique node ID from prior evidence when the tool and graph match, and constrained generated node arguments to exact entity hints or dependency outputs. Added regression coverage for this behavior. Investigated q26's ambiguity, clarified that ``close'' requires a chosen metric (fewest hops, weighted distance, or similarity), and added tests for clarification and unweighted shortest paths.
+\item \textbf{Syed Sufiyan (NS26Z168):} Orchestrator integration and public-set evaluation;
+  Assignment~3 node-similarity, diameter/eccentricity and betweenness implementations.
 \item \textbf{Mohd Hamza (PH22B016):} Code review and independent reference checks, failure analysis,
   registry bug investigation and clean-setup review. Wrote this report.
 \end{itemize}
