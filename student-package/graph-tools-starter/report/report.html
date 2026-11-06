@@ -69,12 +69,9 @@
   <p>A minimal motif-count reproduction uses the Karate induced subgraph on <code>m2, m3, m14</code>: it contains one triangle, but <code>motif_count.7cc0c2d7</code> reports two. The third-node loop compares node ID strings after the first two were ordered by their positions in the node list; those orders disagree for <code>m14</code> and <code>m2</code>.</p>
   <p>Other candidates initially flagged by the local evaluator were checked before attribution: some output-shape differences had been misread by the evaluator. They are not reported as implementation bugs. The confirmed issues above should be discussed through the course's General Discussion channel without sharing source code.</p>
   <h2>6. Member contributions</h2>
-  <p>Member names and IDs follow the group's TeX draft. Verify the two remaining marked contributions with the team before submission.</p>
   <table>
     <tr><th>Member</th><th>Contribution</th></tr>
-    <tr><td>Pallepogu Rishi (CS23B048)</td><td>[Confirm actual contribution]</td></tr>
     <tr><td>Abhinand Shaji (ED22B044)</td><td>Curated and tested the registry tools. Improved executor replanning by reusing a unique node ID from prior evidence when the tool and graph match; constrained generated node arguments to exact entity hints or dependency outputs, with regression tests. Investigated q26's ambiguous meaning of “close” and added clarification and unweighted-path tests.</td></tr>
-    <tr><td>Pervaje Surya Prasad Bhat (ED23B035)</td><td>[Confirm actual contribution]</td></tr>
     <tr><td>Syed Sufiyan (NS26Z168)</td><td>Built and integrated the manifest-driven orchestrator: graph catalogue and entity hints, structured query interpretation and planning, multi-tool subgraph chaining, evidence-bound answers and status handling, retry/cache and checkpointed tracing, the batch runner, offline public scoring, and regression tests. Ran and analysed repeated public-set evaluations.</td></tr>
     <tr><td>Mohd Hamza (PH22B016)</td><td>Code review and independent reference checks, failure analysis, registry bug investigation and clean-setup review. Wrote this report.</td></tr>
   </table>
@@ -82,4 +79,5 @@
 </section>
 </body>
 </html>
+
 
