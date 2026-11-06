@@ -1,4 +1,8 @@
-from evaluation.score_public import compare, topological_valid
+import pytest
+
+# The offline scorer (evaluation/) holds the public expected answers and is not committed; skip without it.
+score_public = pytest.importorskip("evaluation.score_public")
+compare, topological_valid = score_public.compare, score_public.topological_valid
 
 
 def test_public_scorer_checks_status_type_and_numeric_tolerance():

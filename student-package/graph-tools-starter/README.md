@@ -5,11 +5,11 @@ A Gemini-powered LangGraph orchestrator that plans, executes and chains manifest
 ## Requirements
 
 - Python 3.10 or newer
-- Google Gemini with OpenAI-compatible function calling
-- `LLM_API_KEY`
-- The published `Registry.zip`
+- A Google Gemini API key (OpenAI-compatible function calling)
 
-The exact Gemini model remains configurable with `LLM_MODEL`. Never commit an API key.
+The API key is read from the environment variable **`LLM_API_KEY`** (directly, or from a `.env` file). The provider and model are set with `LLM_BASE_URL` and `LLM_MODEL`. Never commit an API key.
+
+The curated registry (one implementation per tool) is already included in `registry/tools/`, so `Registry.zip` is only needed if you want to redo the curation.
 
 ## Setup
 
@@ -28,32 +28,32 @@ LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_MODEL=gemini-3.8-flash
 ```
 
-## Curate Registry.zip
+Instead of a `.env` file you can export the variable: `export LLM_API_KEY=your-key`.
 
-Extract `Registry.zip` in the top-level Assignment 3 directory so its implementations are under `tools/<tool_name>/<implementation_id>/`. The runtime does not choose between duplicate student implementations. Curation independently tests candidates and materializes exactly one implementation per official tool name.
+## Curated registry
 
-From `graph-tools-starter`:
-
-```bash
-python curate_registry.py evaluate \
-  --source ../../tools \
-  --report .orchestrator/curation_report.json \
-  --selection .orchestrator/registry_selection.json
-```
-
-Review or override `.orchestrator/registry_selection.json`, then create the final registry:
+`registry/tools/` already contains the selected implementation of each of the 33 tools, copied unchanged from `Registry.zip`. Check it with:
 
 ```bash
-python curate_registry.py materialize \
-  --source ../../tools \
-  --selection .orchestrator/registry_selection.json \
-  --dest registry/tools \
-  --replace
-
 python curate_registry.py verify
 ```
 
-Registry source files are copied unchanged. Strict verification requires one implementation for all 33 analytical tools plus the four instructor infrastructure tools.
+To redo the curation, extract `Registry.zip` anywhere and point `--source` at its `tools/` folder. Curation runs every implementation through the course validator, a canonical workload, a NetworkX-based check and a determinism check, and selects the fastest eligible one per tool:
+
+```bash
+python curate_registry.py evaluate \
+  --source <path to extracted Registry.zip>/tools \
+  --report .orchestrator/curation_report.json \
+  --selection .orchestrator/registry_selection.json
+
+python curate_registry.py materialize \
+  --source <path to extracted Registry.zip>/tools \
+  --selection .orchestrator/registry_selection.json \
+  --dest registry/tools \
+  --replace
+```
+
+Because selection is by speed, a new run on another machine may pick a different (equally eligible) implementation. The committed `registry/tools/` is the version our public-set traces use. Strict verification requires one implementation for all 33 analytical tools plus the four instructor infrastructure tools.
 
 ## Run
 
@@ -69,8 +69,8 @@ Useful development options:
 
 ```bash
 python run_queries.py \
-  --queries queries_registry_all.json \
-  --out answers_registry_all.json \
+  --queries queries_public.json \
+  --out answers_public.json \
   --resume
 ```
 
@@ -84,9 +84,7 @@ Strict registry startup is the default. Warn mode is intended only for developme
 
 ## Query formats
 
-The runner accepts plain text, JSON arrays, JSON objects containing a `queries` list, and JSONL. Objects may use `query_id`/`id` and `question`/`query`/`text`.
-
-The included `queries_registry_all.json` is a 41-question development set covering all analytical and infrastructure tools, two chaining scenarios, ambiguity and an unsupported request. It is not the official public set.
+The runner accepts plain text, JSON arrays, JSON objects containing a `queries` list, and JSONL. Objects may use `query_id`/`id` and `question`/`query`/`text`. `queries_public.json` is the official public set of 30 questions.
 
 ## Answer format
 
@@ -131,16 +129,6 @@ python smoke_test.py --no-llm
 
 A live Gemini smoke run requires `LLM_API_KEY`.
 
-Score a public run offline without exposing expected answers to the orchestrator:
-
-```bash
-python evaluation/score_public.py answers_public.json
-# Or score a trace archive:
-python evaluation/score_public.py ../../public_queries.zip
-```
-
-The evaluator checks status, answer type, numeric tolerance, node IDs, ranked order, paths and topological-order validity. Nothing under `evaluation/` is imported by runtime orchestration code.
-
 ## Project Layout
 
 ```text
@@ -153,8 +141,7 @@ orchestrator/executor.py        bindings, tool calls and GraphStore replay
 orchestrator/workflow.py        LangGraph state machine
 orchestrator/provider.py        Gemini retries and cache
 orchestrator/tracing.py         append-safe JSONL traces
-registry/tools/                 generated one-implementation-per-tool registry
-queries_registry_all.json       non-public development questions
-evaluation/                     offline public expected answers and scorer
+registry/tools/                 curated one-implementation-per-tool registry (committed)
+queries_public.json             official public question set
 tests/project/                  orchestration and curation tests
 ```
