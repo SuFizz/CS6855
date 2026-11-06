@@ -8,6 +8,7 @@ from graphkit.contract import error
 from graphkit.llm import tool_schema
 
 from .schema import resolve_pointer, validate_arguments, validate_tool_output
+from .graph_catalogue import find_entity_hints
 
 
 class PlanExecutor:
@@ -38,17 +39,30 @@ class PlanExecutor:
         tool = self.tools[step["tool"]]
         required = tool.manifest.get("parameters", {}).get("required", [])
         missing = [name for name in required if name not in arguments]
+        if "node" in missing and arguments.get("graph_id"):
+            prior_nodes = {
+                record.get("arguments", {}).get("node")
+                for record in evidence.values()
+                if record.get("tool") == tool.name
+                and record.get("arguments", {}).get("graph_id") == arguments["graph_id"]
+                and isinstance(record.get("arguments", {}).get("node"), str)
+            }
+            if len(prior_nodes) == 1:
+                arguments["node"] = next(iter(prior_nodes))
+                missing.remove("node")
         if not missing:
             return arguments, 0, None
         if self.provider is None:
             return arguments, 0, f"Missing required parameter(s) for {tool.name}: {', '.join(missing)}."
         dependency_outputs = {step_id: evidence[step_id]["output"] for step_id in step.get("depends_on", []) if step_id in evidence}
+        entity_hints = find_entity_hints(self.data_dir, self.question)
         payload = {"question": self.question, "step": {"id": step["id"], "purpose": step["purpose"]},
                    "known_arguments": arguments, "missing_required": missing,
                    "available_graph_ids": [item["graph_id"] for item in self.store.list_graphs()],
+                   "entity_hints": entity_hints,
                    "dependency_outputs": dependency_outputs}
         messages = [
-            {"role": "system", "content": "Call the supplied graph tool exactly once. Fill missing required arguments from the original question. Preserve every known argument exactly. Include user-requested optional values such as k, seed and top_k when stated. For graph_id use only an exact available_graph_ids value or a dependency-produced result_graph_id. Do not invent, rename or transform graph or node IDs. For lookup_node, if a phrase contains a short uppercase/alphanumeric code token, use that exact token as name instead of including surrounding city, location or generic words."},
+            {"role": "system", "content": "Call the supplied graph tool exactly once. Fill missing required arguments from the original question, exact entity_hints IDs, and dependency_outputs. Preserve every known argument exactly. Include user-requested optional values such as k, seed and top_k when stated. For graph_id use only an exact available_graph_ids value or a dependency-produced result_graph_id. For node identifiers, copy an exact ID from entity_hints or dependency_outputs; never strip prefixes, convert IDs to numbers, or invent an ID. Do not invent, rename or transform graph or node IDs. For lookup_node, if a phrase contains a short uppercase/alphanumeric code token, use that exact token as name instead of including surrounding city, location or generic words."},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
         try:
@@ -63,6 +77,27 @@ class PlanExecutor:
             generated = json.loads(raw) if isinstance(raw, str) else raw
             if not isinstance(generated, dict):
                 raise ValueError("tool arguments must be an object")
+            graph_id = generated.get("graph_id", arguments.get("graph_id"))
+            node_id = generated.get("node", arguments.get("node"))
+            if node_id is not None and graph_id and self.store.has_graph(graph_id):
+                graph = self.store.get(graph_id)
+                if not graph.has_node(node_id):
+                    hinted_ids = {
+                        match["id"]
+                        for hint in entity_hints if hint["graph_id"] == graph_id
+                        for match in hint["matches"]
+                    }
+                    exact_hint = next(
+                        (node for node in hinted_ids if node.casefold() == str(node_id).casefold()),
+                        None,
+                    )
+                    if exact_hint is None and len(hinted_ids) == 1:
+                        exact_hint = next(iter(hinted_ids))
+                    if exact_hint is None:
+                        raise ValueError(
+                            f"Generated node ID {node_id!r} is not valid in graph {graph_id!r}."
+                        )
+                    generated["node"] = exact_hint
         except Exception as exc:
             return arguments, 1, f"Could not prepare arguments for {tool.name}: {type(exc).__name__}: {exc}"
         generated.update(arguments)

@@ -70,11 +70,11 @@
   <p>A minimal motif-count reproduction uses the Karate induced subgraph on <code>m2, m3, m14</code>: it contains one triangle, but <code>motif_count.7cc0c2d7</code> reports two. The third-node loop compares node ID strings after the first two were ordered by their positions in the node list; those orders disagree for <code>m14</code> and <code>m2</code>.</p>
   <p>Other candidates initially flagged by the local evaluator were checked before attribution: some output-shape differences had been misread by the evaluator. They are not reported as implementation bugs. The confirmed issues above should be discussed through the course's General Discussion channel without sharing source code.</p>
   <h2>6. Member contributions</h2>
-  <p>Member names and IDs follow the group's TeX draft. Verify the three marked contributions with the team before submission; do not submit the placeholders.</p>
+  <p>Member names and IDs follow the group's TeX draft. Verify the two remaining marked contributions with the team before submission.</p>
   <table>
     <tr><th>Member</th><th>Contribution</th></tr>
     <tr><td>Pallepogu Rishi (CS23B048)</td><td>[Confirm actual contribution]</td></tr>
-    <tr><td>Abhinand Shaji (ED22B044)</td><td>[Confirm actual contribution]</td></tr>
+    <tr><td>Abhinand Shaji (ED22B044)</td><td>Improved executor reliability during replanning by reusing a unique node ID from prior evidence when the tool and graph match, and constrained generated node arguments to exact entity hints or dependency outputs. Added regression coverage. Investigated q26's ambiguity, clarified that “close” requires a chosen metric (fewest hops, weighted distance, or similarity), and added tests for clarification and unweighted shortest paths.</td></tr>
     <tr><td>Pervaje Surya Prasad Bhat (ED23B035)</td><td>[Confirm actual contribution]</td></tr>
     <tr><td>Syed Sufiyan (NS26Z168)</td><td>Orchestrator integration and public-set evaluation; Assignment 3 graph tools for similarity, diameter/eccentricity and betweenness.</td></tr>
     <tr><td>Mohd Hamza (PH22B016)</td><td>Code review, independent reference checks, failure and registry-bug analysis, clean-setup review and report drafting (per group draft).</td></tr>
