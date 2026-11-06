@@ -43,18 +43,17 @@
   <p>The public set has 30 questions. Answers were checked against the supplied public expectations: numeric tolerance 0.1%, exact structured status/type, node IDs, ranked order where specified, and prerequisite-valid topological orders. The table reports the <b>best matching terminal answers with authentic traces across recorded attempts</b>, not the outcome of a single uninterrupted batch. The earlier q26 clarification from <code>answers_public_v5.json</code> was <b>deliberately excluded</b>; the later q26 error is counted instead.</p>
   <table>
     <tr><th>Expected class</th><th>Correct / total</th><th>Selected outcome</th></tr>
-    <tr><td>Answerable (q01–q23)</td><td>19 / 23</td><td>19 answered correctly; q12, q17, q21 and q22 ended in error</td></tr>
+    <tr><td>Answerable (q01–q23)</td><td>20 / 23</td><td>20 correct answers; q17 and q22 errored, q21 answered incorrectly</td></tr>
     <tr><td>Ambiguous (q24–q26)</td><td>2 / 3</td><td>q24 and q25 clarified; q26 ended in error</td></tr>
     <tr><td>Unsupported (q27–q30)</td><td>4 / 4</td><td>All four correctly unsupported</td></tr>
-    <tr><th>Total</th><th>25 / 30 (83.3%)</th><th>19 answered, 2 clarification_needed, 4 unsupported, 5 error</th></tr>
+    <tr><th>Total</th><th>26 / 30 (86.7%)</th><th>21 answered (20 correct), 2 clarification_needed, 4 unsupported, 3 error</th></tr>
   </table>
-  <p>Two further answer JSON entries (q12 and q21) have correct structured values, but their corresponding traces still end in <code>error</code>. They are <b>not counted</b> because the project requires trace support for an answer. Counting JSON alone, and still excluding the old q26 answer, would give 27/30; that is not the trace-backed result. No hidden-set accuracy is claimed.</p>
+  <p>The q12 answer and trace agree on a Jaccard similarity of 0.432432, so q12 is counted. The q21 answer and trace both give c63, but that value comes from betweenness on the entire <code>lesmis</code> graph, not Valjean's circle; the expected local answer is c40. No hidden-set accuracy is claimed.</p>
   <h2>4. Failure analysis</h2>
   <ul>
-    <li><b>q12 — exhausted finalization budget:</b> A successful similarity call returned a Valjean–Javert Jaccard score of 0.432432, but earlier attempts passed character names where node IDs were required. The LLM-call budget expired before a terminal answer was recorded. Correct numerical evidence alone did not make this run correct.</li>
     <li><b>q17 — evidence scope misjudged:</b> Degree centrality on an instructor ego subgraph ranked m1 first and m2 next. The question asked for the most connected <i>friend</i>, excluding m1. The assessor incorrectly called that derived-subgraph ranking a global ranking and replanning exhausted its limit. A later run still lacked a matching successful terminal answer.</li>
     <li><b>q22 — incomplete multi-step plan:</b> Triangle counting in Javert's immediate circle requires resolving Javert, constructing an ego subgraph, then running a motif-count tool. A prior plan embedded arguments in tool-name strings; a later attempt called clustering tools instead and hit the replan limit. No supported terminal number was obtained.</li>
-    <li><b>q21 — provider interruption:</b> Javert (c40) appears in JSON, but its reused trace ends in a rate-limited error. It needs a matching successful terminal trace.</li>
+    <li><b>q21 — wrong graph for the calculation:</b> Betweenness was calculated on all 77 <code>lesmis</code> characters, making Myriel (c63) rank second globally. The workflow then built Valjean's neighbour graph without recalculating betweenness there. Instead it should calculate betweenness on Valjean's 37-node ego graph (including Valjean), then exclude Valjean only when choosing the answer. That calculation ranks Javert (c40) next, at 0.062634.</li>
     <li><b>q26 — ambiguity pursued as a computation:</b> “How close” could mean hops, shared chapters or neighbourhood similarity. The later run tried weighted shortest-path steps and failed instead of asking for clarification. Shared-chapter counts describe link strength, not distance; the earlier clarification is intentionally not used.</li>
   </ul>
 </section>
@@ -74,10 +73,10 @@
   <table>
     <tr><th>Member</th><th>Contribution</th></tr>
     <tr><td>Pallepogu Rishi (CS23B048)</td><td>[Confirm actual contribution]</td></tr>
-    <tr><td>Abhinand Shaji (ED22B044)</td><td>Improved executor reliability during replanning by reusing a unique node ID from prior evidence when the tool and graph match, and constrained generated node arguments to exact entity hints or dependency outputs. Added regression coverage. Investigated q26's ambiguity, clarified that “close” requires a chosen metric (fewest hops, weighted distance, or similarity), and added tests for clarification and unweighted shortest paths.</td></tr>
+    <tr><td>Abhinand Shaji (ED22B044)</td><td>Curated and tested the registry tools. Improved executor replanning by reusing a unique node ID from prior evidence when the tool and graph match; constrained generated node arguments to exact entity hints or dependency outputs, with regression tests. Investigated q26's ambiguous meaning of “close” and added clarification and unweighted-path tests.</td></tr>
     <tr><td>Pervaje Surya Prasad Bhat (ED23B035)</td><td>[Confirm actual contribution]</td></tr>
-    <tr><td>Syed Sufiyan (NS26Z168)</td><td>Orchestrator integration and public-set evaluation; Assignment 3 graph tools for similarity, diameter/eccentricity and betweenness.</td></tr>
-    <tr><td>Mohd Hamza (PH22B016)</td><td>Code review, independent reference checks, failure and registry-bug analysis, clean-setup review and report drafting (per group draft).</td></tr>
+    <tr><td>Syed Sufiyan (NS26Z168)</td><td>Built and integrated the manifest-driven orchestrator: graph catalogue and entity hints, structured query interpretation and planning, multi-tool subgraph chaining, evidence-bound answers and status handling, retry/cache and checkpointed tracing, the batch runner, offline public scoring, and regression tests. Ran and analysed repeated public-set evaluations.</td></tr>
+    <tr><td>Mohd Hamza (PH22B016)</td><td>Code review and independent reference checks, failure analysis, registry bug investigation and clean-setup review. Wrote this report.</td></tr>
   </table>
   <p class="note">AI-assisted coding was used; the group remains responsible for explaining and validating its submitted code and results.</p>
 </section>
